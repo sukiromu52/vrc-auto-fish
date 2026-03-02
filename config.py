@@ -87,12 +87,12 @@ FISH_GAME_SIZE = 30
 DEAD_ZONE       = 15              # 固定死区(px), 备用 (动态死区优先)
 DEAD_ZONE_RATIO = 0.35            # 动态死区: 白条高度 × 此比例 (鱼在白条中心此范围内=居中)
 MAINTAIN_TAP_S  = 0.010           # 死区内维持性短按时长(秒), 抵消重力防坠底
-HOLD_MIN_S      = 0.015           # 最短按住时间 (秒)
-HOLD_MAX_S      = 0.055           # 最长按住时间 (秒) — 高惯性必须极短
-HOLD_GAIN       = 0.0006          # 按住时长 = error * HOLD_GAIN (秒/像素)
+HOLD_MIN_S      = 0.025           # 抗重力基准 (秒) — 越小下降越快
+HOLD_MAX_S      = 0.100           # 单次最长按住 (秒)
+HOLD_GAIN       = 0.040           # 位置增益: 误差×增益=额外按住时长
 VELOCITY_SMOOTH = 0.5             # 速度低通滤波系数 (0~1, 越大越平滑)
 PREDICT_AHEAD   = 0.5             # 前瞻时间 (秒) — 高惯性系统需要更远的预判
-SPEED_DAMPING   = 0.005           # 速度衰减系数: 白条上升越快, 按住时间越短
+SPEED_DAMPING   = 0.00025         # 速度阻尼: 下坠快时加按住, 上升快时减按住
 MAX_FISH_BAR_DIST = 300           # ★ 鱼和白条中心最大合理距离(px), 超过视为误检
 REGION_UP         = 300           # 白条锁定后, 向上搜索像素数
 REGION_DOWN       = 400           # 白条锁定后, 向下搜索像素数

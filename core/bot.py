@@ -1651,14 +1651,13 @@ class FishingBot:
 
         vel = self._bar_velocity
 
-        # ═══════════ ★ 连续 PD 控制器 ═══════════
-        # 增益常量 (不放 config, 属于控制器内部实现)
-        TARGET_FIB = 0.5      # 目标: 鱼在白条中心
-        KP         = 0.040    # 位置增益: 40ms / 单位误差
-        KD         = 0.00025  # 速度阻尼: 0.25ms / (px/s)
-        BASE_HOLD  = 0.025    # 抗重力基准: 25ms (悬停所需)
-        MAX_HOLD   = 0.100    # 单次最长按住
-        MIN_HOLD   = 0.004    # 低于此视为释放
+        # ═══════════ ★ 连续 PD 控制器 (读取 GUI 参数) ═══════════
+        TARGET_FIB = 0.5
+        KP         = getattr(config, 'HOLD_GAIN', 0.040)
+        KD         = getattr(config, 'SPEED_DAMPING', 0.00025)
+        BASE_HOLD  = getattr(config, 'HOLD_MIN_S', 0.025)
+        MAX_HOLD   = getattr(config, 'HOLD_MAX_S', 0.100)
+        MIN_HOLD   = 0.004
 
         if fish is not None and bar is not None:
             raw_fish_cy = fish[1] + fish[3] // 2
