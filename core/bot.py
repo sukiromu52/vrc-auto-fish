@@ -243,20 +243,16 @@ class FishingBot:
         """
         提竿后验证钓鱼小游戏 UI 是否真的出现了。
 
-        ★ 快速验证: 只需 VERIFY_CONSECUTIVE 帧检测到 UI 即可确认。
-        ★ 使用 2 种方式检测 (按优先级):
-            1. 模板匹配轨道
-            2. 模板匹配白条 — 兜底
-
-        如果在 VERIFY_TIMEOUT 内确认 → True (立即进入小游戏)
-        如果超时未确认 → False (误触发，需要重新抛竿)
+        改为 **累计** N 帧检测到 UI 即确认（不要求严格连续），
+        同时优先使用 YOLO（若可用），模板匹配作为兜底。
         """
         self.state = "验证小游戏"
         log.info("[🔍 验证] 快速检测小游戏UI...")
 
         t0 = time.time()
-        consecutive = 0
+        hit_count = 0
         required = config.VERIFY_CONSECUTIVE
+        _use_yolo = config.USE_YOLO and self.yolo is not None
 
         # 重置旋转状态
         self._track_angle = 0.0
@@ -267,35 +263,51 @@ class FishingBot:
             screen = self._grab()
             found = False
 
-            # ★ debug 窗口
             self._show_debug_overlay(
                 screen,
-                status_text=f"🔍 验证UI ({consecutive}/{required})"
+                status_text=f"🔍 验证UI ({hit_count}/{required})"
             )
 
             _roi = config.DETECT_ROI
-            bar = self.detector.find_multiscale(
-                screen, "bar", config.THRESH_BAR,
-                scales=config.BAR_SCALES,
-                search_region=_roi,
-            )
-            track = self.detector.find_multiscale(
-                screen, "track", config.THRESH_TRACK,
-                search_region=_roi,
-            )
 
-            bar_cx = (bar[0] + bar[2] // 2) if bar else None
-            track_cx = (track[0] + track[2] // 2) if track else None
+            # ── 优先 YOLO 检测 ──
+            if _use_yolo:
+                try:
+                    det = self.yolo.detect(screen, _roi)
+                    if det.get("bar") and det.get("track"):
+                        yb = det["bar"]
+                        yt = det["track"]
+                        bar_cx = yb[0] + yb[2] // 2
+                        track_cx = yt[0] + yt[2] // 2
+                        if abs(bar_cx - track_cx) < 150:
+                            found = True
+                            detected_angle = 0.0
+                except Exception:
+                    pass
 
-            if bar_cx is not None and track_cx is not None:
-                if abs(bar_cx - track_cx) < 150:
-                    found = True
-                    detected_angle = 0.0
+            # ── 模板匹配兜底 ──
+            if not found:
+                bar = self.detector.find_multiscale(
+                    screen, "bar", config.THRESH_BAR,
+                    scales=config.BAR_SCALES,
+                    search_region=_roi,
+                )
+                track = self.detector.find_multiscale(
+                    screen, "track", config.THRESH_TRACK,
+                    search_region=_roi,
+                )
+
+                bar_cx = (bar[0] + bar[2] // 2) if bar else None
+                track_cx = (track[0] + track[2] // 2) if track else None
+
+                if bar_cx is not None and track_cx is not None:
+                    if abs(bar_cx - track_cx) < 150:
+                        found = True
+                        detected_angle = 0.0
 
             if found:
-                consecutive += 1
-                if consecutive >= required:
-                    # ★ 确定旋转补偿 (角度必须在合理范围内)
+                hit_count += 1
+                if hit_count >= required:
                     if detected_angle is not None:
                         self._track_angle = detected_angle
                         angle_abs = abs(self._track_angle)
@@ -309,14 +321,12 @@ class FishingBot:
                         f", 角度={self._track_angle:.1f}°)"
                     )
                     return True
-            else:
-                consecutive = 0
 
-            time.sleep(0.03)  # ★ 0.15→0.03 极短间隔, 尽快检测到UI
+            time.sleep(0.03)
 
         log.warning(
             f"[✗ 误触] {config.VERIFY_TIMEOUT:.1f}s 内未确认小游戏UI "
-            f"(最高连续: {consecutive}/{required})，将重新抛竿"
+            f"(累计命中: {hit_count}/{required})，将重新抛竿"
         )
         return False
 
