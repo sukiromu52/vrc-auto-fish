@@ -44,7 +44,13 @@ class YoloDetector:
 
         import config as _cfg
         dev_pref = getattr(_cfg, "YOLO_DEVICE", "auto")
-        if dev_pref == "cpu":
+        cuda_ok = False
+        try:
+            import torch
+            cuda_ok = torch.cuda.is_available()
+        except Exception:
+            pass
+        if dev_pref == "cpu" or not cuda_ok:
             target_dev = "cpu"
         elif dev_pref == "gpu":
             target_dev = 0

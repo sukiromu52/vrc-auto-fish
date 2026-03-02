@@ -160,39 +160,35 @@ class InputController:
 
     # ────────────────── 视角控制 ──────────────────
 
-    def shake_head(self, degrees: float = 5.0, duration: float = 1.5):
+    def shake_head(self):
         """
-        抛竿前摇头: 左→右→归零, 总耗时 duration 秒。
-        OSC 模式用 /input/LookHorizontal, PostMessage 模式用 mouse_event。
+        抛竿前摇头: 左→右→归零。
+        按住时长从 config.SHAKE_HEAD_TIME 读取, 0 则跳过。
+        始终通过 OSC 发送 (独立于输入模式), VRChat 需开启 OSC。
         """
-        import math
-        steps = 60
-        dt = duration / steps
-        for i in range(steps):
-            if not self.wm.is_valid():
-                break
-            t = i / steps
-            # 正弦波: 0→左→0→右→0
-            angle = math.sin(t * 2 * math.pi) * degrees
-            if self._use_osc and self._osc_client:
-                value = max(-1.0, min(1.0, angle / 45.0))
-                try:
-                    self._osc_client.send_message(
-                        "/input/LookHorizontal", float(value))
-                except Exception:
-                    pass
-            else:
-                pixels_per_deg = 10
-                dx = int(math.sin(t * 2 * math.pi) * degrees
-                         * pixels_per_deg / steps * 2 * math.pi)
-                if dx != 0:
-                    user32.mouse_event(0x0001, dx, 0, 0, 0)
-            time.sleep(dt)
-        if self._use_osc and self._osc_client:
-            try:
-                self._osc_client.send_message("/input/LookHorizontal", 0.0)
-            except Exception:
-                pass
+        import config as _cfg
+        t = getattr(_cfg, "SHAKE_HEAD_TIME", 0.01)
+        if t <= 0:
+            return
+        try:
+            from pythonosc import udp_client
+            osc = udp_client.SimpleUDPClient("127.0.0.1", 9000)
+        except Exception:
+            return
+        try:
+            osc.send_message("/input/LookLeft", 1)
+            time.sleep(t)
+            osc.send_message("/input/LookLeft", 0)
+
+            osc.send_message("/input/LookRight", 1)
+            time.sleep(t * 2)
+            osc.send_message("/input/LookRight", 0)
+
+            osc.send_message("/input/LookLeft", 1)
+            time.sleep(t)
+            osc.send_message("/input/LookLeft", 0)
+        except Exception:
+            pass
 
     # ────────────────── 安全 ──────────────────
 

@@ -43,12 +43,16 @@ class FishingBot:
 
     # 鱼模板 → 中文名 + 调试框颜色 (BGR)
     FISH_DISPLAY = {
+        "fish_black":   ("黑鱼",  (80, 80, 80)),
         "fish_white":   ("白鱼",  (255, 255, 255)),
-        "fish_green":   ("绿鱼",  (0, 255, 0)),
-        "fish_golden":  ("金鱼",  (0, 215, 255)),
         "fish_copper":  ("铜鱼",  (50, 127, 180)),
+        "fish_green":   ("绿鱼",  (0, 255, 0)),
         "fish_blue":    ("蓝鱼",  (255, 150, 0)),
         "fish_purple":  ("紫鱼",  (200, 50, 200)),
+        "fish_golden":  ("金鱼",  (0, 215, 255)),
+        "fish_pink":    ("粉鱼",  (180, 105, 255)),
+        "fish_red":     ("红鱼",  (0, 0, 255)),
+        "fish_rainbow": ("彩鱼",  (0, 255, 255)),
     }
 
     def __init__(self):
@@ -162,7 +166,7 @@ class FishingBot:
             log.info("[🎣 抛竿] 录制模式 — 请手动抛竿 (点击鼠标)")
         else:
             log.info("[🎣 抛竿] 摇头 → 抛竿...")
-            self.input.shake_head(degrees=5.0, duration=1.5)
+            self.input.shake_head()
             self.input.click()
         # ★ 从抛竿开始就显示 debug 窗口
         try:
@@ -416,6 +420,9 @@ class FishingBot:
         frame = 0
         hold_count = 0         # 按住次数
         success = False
+        _skip_fish = False     # ★ 白名单跳过标志: 非目标鱼→放弃控制
+        _fish_id_saved = False # ★ 鱼种识别截图只保存一次
+        self._progress_debug_saved = False  # ★ 进度条截图只保存一次
         minigame_start = time.time()   # ★ 计时: 超时强制结束
         ui_gone_count = 0              # ★ UI消失计数器
         had_good_detection = False     # ★ 是否曾经成功检测到鱼+条
@@ -501,10 +508,10 @@ class FishingBot:
         if config.IL_RECORD:
             log.info("  ► 录制模式 — 跳过开局按压, 请手动控制")
         else:
-            log.info("  ► 开局延迟0.5s + 按压0.4s")
+            log.info("  ► 开局延迟0.5s + 按压0.2s")
             time.sleep(0.5)
             self.input.mouse_down()
-            time.sleep(0.4)
+            time.sleep(0.2)
             self.input.mouse_up()
 
         _last_progress_sr = None
@@ -609,8 +616,17 @@ class FishingBot:
                     fish = _ydet["fish"]
                     bar = _ydet["bar"]
                     _yolo_progress = _ydet.get("progress")
-                    _matched_key = _ydet["fish_name"] if fish else None
-                    fish_detect_name = _ydet["fish_name"]
+                    if fish is not None:
+                        _save = not _fish_id_saved
+                        _color_key = self.detector.identify_fish_type(
+                            screen, fish, debug_save=_save)
+                        if _save:
+                            _fish_id_saved = True
+                        _matched_key = _color_key
+                        fish_detect_name = _color_key
+                    else:
+                        _matched_key = None
+                        fish_detect_name = ""
 
                     # YOLO 数据采集: 保存完整窗口画面（不裁剪ROI）
                     if config.YOLO_COLLECT and frame % 10 == 0:
@@ -738,6 +754,14 @@ class FishingBot:
 
                 if fish is not None:
                     self._current_fish_name = fish_detect_name
+                    if not _skip_fish and fish_detect_name:
+                        wl_key = fish_detect_name
+                        if not config.FISH_WHITELIST.get(wl_key, True):
+                            fname_cn = self.FISH_DISPLAY.get(
+                                wl_key, (wl_key,))[0]
+                            log.info(
+                                f"[白名单] {fname_cn} 不在白名单中, 放弃本次钓鱼")
+                            _skip_fish = True
 
                 if not _use_yolo and bar is not None and not locked_bar_scales:
                     locked_bar_scales = [
@@ -847,12 +871,29 @@ class FishingBot:
                 if frame <= _PROGRESS_SKIP_FRAMES:
                     pass
                 elif _use_yolo and _yolo_progress is not None:
-                    prog_w = _yolo_progress[2]
-                    if _last_track_w is None and _ydet.get("track") is not None:
-                        _last_track_w = _ydet["track"][2]
-                    if _last_track_w is not None and _last_track_w > 0:
-                        track_w = _last_track_w
-                        green = min(1.0, prog_w / track_w)
+                    px, py, pw, ph = _yolo_progress[:4]
+                    pcx = px + pw // 2
+                    strip_w = 5
+                    sx = max(0, pcx - strip_w // 2)
+                    green = self.detector.detect_green_ratio(
+                        screen, (sx, py, strip_w, ph))
+                    if not self._progress_debug_saved and green > 0:
+                        self._progress_debug_saved = True
+                        _pad = 20
+                        _dx = max(0, px - _pad)
+                        _dw = min(pw + _pad * 2, w_scr - _dx)
+                        _dbg = screen[py:py + ph, _dx:_dx + _dw].copy()
+                        cv2.rectangle(_dbg, (sx - _dx, 0),
+                                      (sx - _dx + strip_w, ph),
+                                      (0, 255, 0), 1)
+                        _info = f"green={green:.0%} w={strip_w}"
+                        cv2.putText(_dbg, _info, (2, 16),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.4,
+                                    (0, 255, 255), 1)
+                        _ddir = os.path.join(config.BASE_DIR, "debug")
+                        os.makedirs(_ddir, exist_ok=True)
+                        cv2.imwrite(
+                            os.path.join(_ddir, "progress_strip.png"), _dbg)
                 else:
                     _sr_for_progress = search_region
                     if bar is not None:
@@ -976,7 +1017,10 @@ class FishingBot:
                     obj_gone_count = 0
 
                 # ════════════ ★ 控制 (录制 / 模型 / PD) ════════════
-                if config.IL_RECORD:
+                if _skip_fish:
+                    self.input.mouse_up()
+                    held = False
+                elif config.IL_RECORD:
                     self._il_record_frame(frame, fish, bar)
                     held = False
                 elif config.IL_USE_MODEL and self._il_policy is not None:
@@ -1013,7 +1057,12 @@ class FishingBot:
                 time.sleep(config.GAME_LOOP_INTERVAL)
 
         finally:
-            if _last_green > 0.55:
+            if _skip_fish:
+                success = False
+                log.info(
+                    f"[⏭ 跳过] 非目标鱼, 已放弃 (进度 {_last_green:.0%} 不计)"
+                )
+            elif _last_green > 0.55:
                 success = True
                 log.info(
                     f"[✅ 成功] 最终进度 {_last_green:.0%} > 55%，判定成功"
@@ -1320,26 +1369,56 @@ class FishingBot:
         fallback = (0, y_start, sw, h - y_start)
         return fallback, None, fallback
 
+    _progress_debug_saved = False
+
     def _check_progress(self, screen, fish, sr):
         """
         检测进度条（绿色部分）。
-        进度条通常在轨道的左侧。
+        以白条中心X左侧 5 像素宽窄条检测绿色占比, 避免背景干扰。
         """
         if sr is None:
             return 0.0
 
-        if fish is not None:
-            right_bound = fish[0] - 5
-        else:
-            right_bound = sr[0] + sr[2] // 3
+        bar_cx = self._bar_locked_cx
+        if bar_cx is None:
+            if fish is not None:
+                bar_cx = fish[0]
+            else:
+                bar_cx = sr[0] + sr[2] // 3
 
-        prog_x = max(0, sr[0])
-        prog_w = max(1, right_bound - prog_x)
-        if prog_w > 5:
-            return self.detector.detect_green_ratio(
-                screen, (prog_x, sr[1], prog_w, sr[3])
-            )
-        return 0.0
+        strip_w = 5
+        sx = max(0, bar_cx - strip_w - 8)
+        sy = sr[1]
+        sw = strip_w
+        sh = sr[3]
+        if sx + sw > screen.shape[1]:
+            sw = screen.shape[1] - sx
+        if sy + sh > screen.shape[0]:
+            sh = screen.shape[0] - sy
+        if sw <= 0 or sh <= 0:
+            return 0.0
+
+        ratio = self.detector.detect_green_ratio(
+            screen, (sx, sy, sw, sh))
+
+        if not self._progress_debug_saved and ratio > 0:
+            self._progress_debug_saved = True
+            import os
+            pad = 30
+            dx = max(0, sx - pad)
+            dw = min(sw + pad * 2, screen.shape[1] - dx)
+            dbg = screen[sy:sy + sh, dx:dx + dw].copy()
+            cv2.rectangle(dbg, (sx - dx, 0), (sx - dx + sw, sh),
+                          (0, 255, 0), 1)
+            info = f"green={ratio:.0%} w={strip_w}"
+            cv2.putText(dbg, info, (2, 16),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
+            debug_dir = os.path.join(config.BASE_DIR, "debug")
+            os.makedirs(debug_dir, exist_ok=True)
+            cv2.imwrite(
+                os.path.join(debug_dir, "progress_strip.png"), dbg)
+
+        return ratio
 
     # ══════════════════════════════════════════════════════
     #  行为克隆: 录制 / 推理
@@ -1719,9 +1798,10 @@ class FishingBot:
 
                     # ★ 验证小游戏是否真的出现了
                     if not self._verify_minigame():
-                        log.info("[🔄 重试] 未检测到小游戏, 收杆后重新抛竿 (等待3s)")
+                        wait = config.POST_CATCH_DELAY
+                        log.info(f"[🔄 重试] 未检测到小游戏, 收杆后等待{wait:.1f}s重新抛竿")
                         self.input.click()
-                        time.sleep(3.0)
+                        time.sleep(wait)
                         log.info("─" * 40)
                         continue
 

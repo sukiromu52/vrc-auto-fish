@@ -41,6 +41,8 @@ TUNABLE_PARAMS = [
     ("搜索上(px)",    "REGION_UP",        "int",   "白条锁定后向上搜索的像素数"),
     ("搜索下(px)",    "REGION_DOWN",      "int",   "白条锁定后向下搜索的像素数"),
     ("搜索X(px)",     "REGION_X",         "int",   "白条中心左右各N像素范围内检测"),
+    ("收杆等待(s)",   "POST_CATCH_DELAY", "float", "钓鱼结束/失败后等待N秒再抛竿"),
+    ("摇头时长(s)",   "SHAKE_HEAD_TIME",  "float", "摇头每段按住时长,0=不摇头"),
 ]
 
 
@@ -49,7 +51,7 @@ class FishingApp:
 
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title("VRChat 自动钓鱼脚本 v2.0")
+        self.root.title("VRC auto fish 263201")
         self.root.geometry("580x800")
         self.root.resizable(True, True)
         self.root.minsize(520, 600)
@@ -153,6 +155,10 @@ class FishingApp:
         self.btn_clearlog = ttk.Button(frm_aux, text="🗑 清空日志",
                                        command=self._on_clear_log, width=12)
         self.btn_clearlog.pack(side="left", padx=5)
+
+        self.btn_whitelist = ttk.Button(frm_aux, text="🐟 白名单",
+                                        command=self._on_whitelist, width=12)
+        self.btn_whitelist.pack(side="left", padx=5)
 
         self.var_topmost = tk.BooleanVar(value=False)
         ttk.Checkbutton(frm_aux, text="窗口置顶",
@@ -359,6 +365,8 @@ class FishingApp:
             "REGION_UP":        300,
             "REGION_DOWN":      400,
             "REGION_X":         100,
+            "POST_CATCH_DELAY": 3.0,
+            "SHAKE_HEAD_TIME":  0.01,
         }
 
         for attr, default_val in defaults.items():
@@ -390,6 +398,7 @@ class FishingApp:
         data["YOLO_COLLECT"] = config.YOLO_COLLECT
         data["YOLO_DEVICE"] = config.YOLO_DEVICE
         data["SHOW_DEBUG"] = config.SHOW_DEBUG
+        data["FISH_WHITELIST"] = config.FISH_WHITELIST
         try:
             with open(config.SETTINGS_FILE, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
@@ -436,6 +445,10 @@ class FishingApp:
                     config.SHOW_DEBUG = bool(val)
                     if hasattr(self, 'var_show_debug'):
                         self.var_show_debug.set(config.SHOW_DEBUG)
+                    loaded.append(attr)
+                elif attr == "FISH_WHITELIST":
+                    if isinstance(val, dict):
+                        config.FISH_WHITELIST.update(val)
                     loaded.append(attr)
                 elif attr in self._param_vars:
                     setattr(config, attr, val)
@@ -571,6 +584,46 @@ class FishingApp:
         self.txt_log.config(state="normal")
         self.txt_log.delete("1.0", "end")
         self.txt_log.config(state="disabled")
+
+    def _on_whitelist(self):
+        """弹窗: 勾选要钓的鱼种"""
+        FISH_NAMES = [
+            ("fish_black",   "黑鱼"),
+            ("fish_white",   "白鱼"),
+            ("fish_copper",  "铜鱼"),
+            ("fish_green",   "绿鱼"),
+            ("fish_blue",    "蓝鱼"),
+            ("fish_purple",  "紫鱼"),
+            ("fish_pink",    "粉鱼"),
+            ("fish_red",     "红鱼"),
+            ("fish_rainbow", "彩鱼"),
+        ]
+        win = tk.Toplevel(self.root)
+        win.title("钓鱼白名单")
+        win.geometry("200x320")
+        win.resizable(False, False)
+        win.transient(self.root)
+        win.grab_set()
+
+        ttk.Label(win, text="勾选要钓的鱼:").pack(pady=(10, 5))
+
+        wl = config.FISH_WHITELIST
+        chk_vars = {}
+        for key, name in FISH_NAMES:
+            var = tk.BooleanVar(value=wl.get(key, True))
+            chk_vars[key] = var
+            ttk.Checkbutton(win, text=name, variable=var).pack(
+                anchor="w", padx=30)
+
+        def _apply():
+            for key, var in chk_vars.items():
+                config.FISH_WHITELIST[key] = var.get()
+            self._save_settings()
+            enabled = [n for (k, n) in FISH_NAMES if chk_vars[k].get()]
+            self._log_msg(f"[白名单] 已更新: {', '.join(enabled)}")
+            win.destroy()
+
+        ttk.Button(win, text="确定", command=_apply).pack(pady=10)
 
     def _on_topmost(self):
         """切换窗口置顶 (用 int 0/1 确保兼容性)"""

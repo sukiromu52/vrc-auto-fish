@@ -574,6 +574,77 @@ class ImageDetector:
             self._last_best_scale = best_scale
         return best_match
 
+    def identify_fish_type(self, screen, fish_box, debug_save=False):
+        """YOLO 给位置后, 分析鱼框内中心区域像素颜色判定鱼种。
+        只取框内中心 70% + 高饱和度像素, 用色相直方图找主色。"""
+        import os
+        import numpy as np
+        fx, fy, fw, fh = fish_box[:4]
+        h_img, w_img = screen.shape[:2]
+        # 只取 YOLO 框中心 70%, 排除边缘背景
+        mx = int(fw * 0.15)
+        my = int(fh * 0.15)
+        x1 = max(0, fx + mx)
+        y1 = max(0, fy + my)
+        x2 = min(w_img, fx + fw - mx)
+        y2 = min(h_img, fy + fh - my)
+        if x2 - x1 < 3 or y2 - y1 < 3:
+            x1, y1 = max(0, fx), max(0, fy)
+            x2, y2 = min(w_img, fx + fw), min(h_img, fy + fh)
+        crop = screen[y1:y2, x1:x2]
+        if crop.size == 0:
+            return "fish_golden"
+
+        hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+        h_ch = hsv[:, :, 0].flatten()
+        s_ch = hsv[:, :, 1].flatten()
+        v_ch = hsv[:, :, 2].flatten()
+
+        mask = (s_ch > 70) & (v_ch > 50)
+        n_sat = int(mask.sum())
+
+        if n_sat < 5:
+            v_mean = float(v_ch.mean())
+            result = "fish_white" if v_mean > 130 else "fish_black"
+        else:
+            h_fish = h_ch[mask]
+            red_count = int(np.sum((h_fish < 12) | (h_fish > 165)))
+            if red_count > n_sat * 0.35:
+                result = "fish_red"
+            else:
+                hist, _ = np.histogram(h_fish, bins=18, range=(0, 180))
+                peak = int(np.argmax(hist))
+                h_dom = peak * 10 + 5
+                if h_dom < 15 or h_dom > 165:
+                    result = "fish_red"
+                elif h_dom < 25:
+                    result = "fish_copper"
+                elif h_dom < 40:
+                    result = "fish_golden"
+                elif h_dom < 80:
+                    result = "fish_green"
+                elif h_dom < 115:
+                    result = "fish_blue"
+                elif h_dom < 140:
+                    result = "fish_purple"
+                elif h_dom < 165:
+                    result = "fish_pink"
+                else:
+                    result = "fish_rainbow"
+
+        if debug_save:
+            full_crop = screen[max(0, fy):min(h_img, fy + fh),
+                               max(0, fx):min(w_img, fx + fw)]
+            dbg = full_crop.copy() if full_crop.size > 0 else crop.copy()
+            info = f"{result} sat={n_sat} h={h_dom if n_sat >= 5 else -1}"
+            cv2.putText(dbg, info, (2, dbg.shape[0] - 4),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 255, 255), 1)
+            debug_dir = os.path.join(config.BASE_DIR, "debug")
+            os.makedirs(debug_dir, exist_ok=True)
+            cv2.imwrite(os.path.join(debug_dir, "fish_id_crop.png"), dbg)
+
+        return result
+
     def find_fish_by_color(self, screen, search_region=None,
                            bar_cx=None):
         """

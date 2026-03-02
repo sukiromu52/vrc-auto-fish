@@ -50,7 +50,8 @@ FISH_LOST_LIMIT     = 120          # 连续N帧鱼消失 → 游戏可能结束
 SINGLE_OBJ_TIMEOUT  = 5.0         # ★ 鱼或条单独消失超过N秒 → 判定失败收杆 (3→5)
 OBJ_MIN_COUNT       = 1            # ★ 每帧至少检测到N个对象才继续 (2→1, 只要鱼或条任一即可)
 OBJ_GONE_LIMIT      = 80           # ★ 连续N帧对象不足 → 游戏结束 (25→80)
-POST_CATCH_DELAY    = 2.5         # 钓鱼结束后冷却
+POST_CATCH_DELAY    = 3.0         # 钓鱼结束/失败后等待(秒), 收杆→等待→摇头→抛竿
+SHAKE_HEAD_TIME     = 0.01        # 摇头每段按住时长(秒)
 MINIGAME_TIMEOUT    = 120.0       # 小游戏最长持续时间 (秒), 超过强制结束
 UI_CHECK_FRAMES     = 30           # 每N帧检查一次轨道是否还在 (15→30, 降低检查频率)
 UI_GONE_LIMIT       = 4            # 连续N次轨道检查失败 → 判定游戏结束 (2→4)
@@ -141,4 +142,20 @@ TEMPLATE_FILES = {
 FISH_KEYS = [
     "fish_white", "fish_green", "fish_golden",
     "fish_copper", "fish_blue", "fish_purple", "fish_black",
+    "fish_pink", "fish_red", "fish_rainbow",
 ]
+
+# ═══════════════════════════════════════════════════════════
+#  钓鱼白名单 (True=要钓, False=放弃)
+# ═══════════════════════════════════════════════════════════
+FISH_WHITELIST = {
+    "fish_black":   True,   # 黑鱼
+    "fish_white":   True,   # 白鱼
+    "fish_copper":  True,   # 铜鱼
+    "fish_green":   True,   # 绿鱼
+    "fish_blue":    True,   # 蓝鱼
+    "fish_purple":  True,   # 紫鱼
+    "fish_pink":    True,   # 粉鱼
+    "fish_red":     True,   # 红鱼
+    "fish_rainbow": True,   # 彩鱼
+}
