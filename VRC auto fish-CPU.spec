@@ -26,7 +26,7 @@ _cuda_keywords = ['cublas', 'cublasLt', 'cudnn', 'cufft', 'cusolver',
                   'cusparse', 'torch_cuda', 'nvrtc', 'c10_cuda',
                   'caffe2_nvrtc', 'nvinfer', 'nvToolsExt', 'nccl',
                   'cudart', 'cupti', 'curand', 'nvJitLink', 'nvjpeg',
-                  'nvperf']
+                  'nvperf', 'shm']
 a.binaries = [b for b in a.binaries
               if not any(k in b[0] for k in _cuda_keywords)]
 
