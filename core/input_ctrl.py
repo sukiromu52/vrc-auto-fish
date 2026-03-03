@@ -115,8 +115,9 @@ class InputController:
     def click(self, focus: bool = False):
         """鼠标左键单击"""
         if self._use_osc:
+            log.info(f"[输入] click(OSC): UseLeft 1→0")
             self._osc_send(1)
-            time.sleep(0.06)
+            time.sleep(0.12)
             self._osc_send(0)
             return
 
@@ -124,8 +125,9 @@ class InputController:
             self.focus_game()
             time.sleep(0.1)
         self._update_click_pos()
+        log.info(f"[输入] click(PM): hwnd={self.wm.hwnd} pos=({self._click_x},{self._click_y})")
         self._post(WM_LBUTTONDOWN, MK_LBUTTON)
-        time.sleep(0.06)
+        time.sleep(0.12)
         self._post(WM_LBUTTONUP, 0)
 
     def click_rapid(self):
@@ -167,8 +169,8 @@ class InputController:
         始终通过 OSC 发送 (独立于输入模式), VRChat 需开启 OSC。
         """
         import config as _cfg
-        t = float(getattr(_cfg, "SHAKE_HEAD_TIME", 0) or 0)
-        if t <= 0.001:
+        t = getattr(_cfg, "SHAKE_HEAD_TIME", 0.01)
+        if t <= 0:
             return
         try:
             from pythonosc import udp_client

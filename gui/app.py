@@ -17,6 +17,7 @@ import cv2
 
 import config
 from core.bot import FishingBot
+from core.input_ctrl import InputController
 from utils.logger import log
 
 
@@ -657,12 +658,13 @@ class FishingApp:
             self.root.focus_force()
 
     def _on_osc_toggle(self):
-        """切换 OSC / PostMessage 输入模式 (下次启动生效)"""
+        """切换 OSC / PostMessage 输入模式（立即重建 InputController）"""
         use_osc = self.var_osc.get()
         config.USE_OSC = use_osc
+        self.bot.input = InputController(self.bot.window, use_osc=use_osc)
         self._save_settings()
         mode = "OSC (VRChat OSC API)" if use_osc else "PostMessage (Win32)"
-        self._log_msg(f"[输入] 已切换为 {mode} — 点击「开始」后生效")
+        self._log_msg(f"[输入] 已切换为 {mode} — 立即生效")
         if use_osc:
             self._log_msg("[输入] 请确保 VRChat 已开启 OSC (圆盘菜单 → OSC → 启用)")
 

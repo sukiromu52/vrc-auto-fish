@@ -173,7 +173,9 @@ class FishingBot:
         else:
             log.info("[🎣 抛竿] 摇头 → 抛竿...")
             self.input.shake_head()
+            time.sleep(0.15)
             self.input.click()
+            log.info("[🎣 抛竿] click() 已发送")
         # ★ 从抛竿开始就显示 debug 窗口
         try:
             screen = self._grab()
