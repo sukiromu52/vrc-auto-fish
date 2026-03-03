@@ -167,8 +167,8 @@ class InputController:
         始终通过 OSC 发送 (独立于输入模式), VRChat 需开启 OSC。
         """
         import config as _cfg
-        t = getattr(_cfg, "SHAKE_HEAD_TIME", 0.01)
-        if t <= 0:
+        t = float(getattr(_cfg, "SHAKE_HEAD_TIME", 0) or 0)
+        if t <= 0.001:
             return
         try:
             from pythonosc import udp_client
