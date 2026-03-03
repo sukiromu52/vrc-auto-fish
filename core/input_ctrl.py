@@ -162,7 +162,7 @@ class InputController:
 
     def shake_head(self):
         """
-        抛竿前摇头: 左→右→归零。
+        抛竿前摇头: 右→左，对称两步。
         按住时长从 config.SHAKE_HEAD_TIME 读取, 0 则跳过。
         始终通过 OSC 发送 (独立于输入模式), VRChat 需开启 OSC。
         """
@@ -176,17 +176,15 @@ class InputController:
         except Exception:
             return
         try:
-            osc.send_message("/input/LookLeft", 1)
-            time.sleep(t)
-            osc.send_message("/input/LookLeft", 0)
-
             osc.send_message("/input/LookRight", 1)
-            time.sleep(t * 2)
+            time.sleep(t)
             osc.send_message("/input/LookRight", 0)
+            time.sleep(0.05)
 
             osc.send_message("/input/LookLeft", 1)
             time.sleep(t)
             osc.send_message("/input/LookLeft", 0)
+            time.sleep(0.05)
         except Exception:
             pass
 
