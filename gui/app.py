@@ -122,9 +122,15 @@ class FishingApp:
         ttk.Label(frm_status, textvariable=self.var_count).grid(
             row=2, column=1, **grid_pad)
 
-        ttk.Label(frm_status, text="调试模式:").grid(row=3, column=0, **grid_pad)
-        ttk.Label(frm_status, textvariable=self.var_debug).grid(
+        # 成功率统计
+        self.var_success_rate = tk.StringVar(value="0/0 (0%)")
+        ttk.Label(frm_status, text="成功率:").grid(row=3, column=0, **grid_pad)
+        ttk.Label(frm_status, textvariable=self.var_success_rate).grid(
             row=3, column=1, **grid_pad)
+
+        ttk.Label(frm_status, text="调试模式:").grid(row=4, column=0, **grid_pad)
+        ttk.Label(frm_status, textvariable=self.var_debug).grid(
+            row=4, column=1, **grid_pad)
 
         # ── 中间：控制按钮 ──
         frm_ctrl = ttk.Frame(self.root)
@@ -188,6 +194,13 @@ class FishingApp:
         ttk.Checkbutton(frm_yolo, text="采集数据",
                         variable=self.var_yolo_collect,
                         command=self._on_yolo_collect_toggle).pack(
+                            side="left", padx=5)
+
+        # 仅在失败时采集
+        self.var_yolo_collect_on_fail = tk.BooleanVar(value=config.YOLO_COLLECT_ON_FAIL)
+        ttk.Checkbutton(frm_yolo, text="仅在失败采集",
+                        variable=self.var_yolo_collect_on_fail,
+                        command=self._on_yolo_collect_on_fail_toggle).pack(
                             side="left", padx=5)
 
         ttk.Label(frm_yolo, text="设备:").pack(side="left", padx=(10, 2))
@@ -356,13 +369,13 @@ class FishingApp:
     def _reset_params(self):
         """恢复所有参数到默认值并删除配置文件"""
         defaults = {
-            "BITE_FORCE_HOOK":  18.0,
-            "FISH_GAME_SIZE":   20,
-            "DEAD_ZONE":        15,
-            "HOLD_MIN_S":       0.025,
+            "BITE_FORCE_HOOK":  0.500,
+            "FISH_GAME_SIZE":   30,
+            "DEAD_ZONE":        12,
+            "HOLD_MIN_S":       0.015,
             "HOLD_MAX_S":       0.100,
             "HOLD_GAIN":        0.040,
-            "PREDICT_AHEAD":    0.5,
+            "PREDICT_AHEAD":    0.400,
             "SPEED_DAMPING":    0.00025,
             "MAX_FISH_BAR_DIST": 300,
             "VELOCITY_SMOOTH":  0.5,
@@ -371,11 +384,11 @@ class FishingApp:
             "REGION_UP":        300,
             "REGION_DOWN":      400,
             "REGION_X":         100,
-            "POST_CATCH_DELAY": 3.0,
-            "SHAKE_HEAD_TIME":  0.02,
+            "POST_CATCH_DELAY": 2.800,
+            "SHAKE_HEAD_TIME":  0.0300,
             "INITIAL_PRESS_TIME": 0.2,
             "VERIFY_CONSECUTIVE": 1,
-            "SUCCESS_PROGRESS": 0.55,
+            "SUCCESS_PROGRESS": 0.42,
         }
 
         for attr, default_val in defaults.items():
@@ -404,6 +417,7 @@ class FishingApp:
             data[attr] = getattr(config, attr)
         data["DETECT_ROI"] = config.DETECT_ROI
         data["YOLO_COLLECT"] = config.YOLO_COLLECT
+        data["YOLO_COLLECT_ON_FAIL"] = config.YOLO_COLLECT_ON_FAIL
         data["YOLO_DEVICE"] = config.YOLO_DEVICE
         data["SHOW_DEBUG"] = config.SHOW_DEBUG
         data["FISH_WHITELIST"] = config.FISH_WHITELIST
@@ -427,8 +441,8 @@ class FishingApp:
                 data["SPEED_DAMPING"] = 0.00025
             if data.get("HOLD_MAX_S", 1) < 0.08:
                 data["HOLD_MAX_S"] = 0.100
-            if data.get("HOLD_MIN_S", 1) < 0.02:
-                data["HOLD_MIN_S"] = 0.025
+            if data.get("HOLD_MIN_S", 1) < 0.01:
+                data["HOLD_MIN_S"] = 0.015
 
             loaded = []
             for attr, val in data.items():
@@ -446,6 +460,11 @@ class FishingApp:
                     config.YOLO_COLLECT = bool(val)
                     if hasattr(self, 'var_yolo_collect'):
                         self.var_yolo_collect.set(config.YOLO_COLLECT)
+                    loaded.append(attr)
+                elif attr == "YOLO_COLLECT_ON_FAIL":
+                    config.YOLO_COLLECT_ON_FAIL = bool(val)
+                    if hasattr(self, 'var_yolo_collect_on_fail'):
+                        self.var_yolo_collect_on_fail.set(config.YOLO_COLLECT_ON_FAIL)
                     loaded.append(attr)
                 elif attr == "YOLO_DEVICE":
                     if val in ("auto", "cpu", "gpu"):
@@ -682,6 +701,16 @@ class FishingApp:
         else:
             self._log_msg("[YOLO] 数据采集已关闭")
 
+    def _on_yolo_collect_on_fail_toggle(self):
+        """切换仅在失败时采集数据模式"""
+        on_fail = self.var_yolo_collect_on_fail.get()
+        config.YOLO_COLLECT_ON_FAIL = on_fail
+        self._save_settings()
+        if on_fail:
+            self._log_msg("[YOLO] 仅在钓鱼失败时采集图像")
+        else:
+            self._log_msg("[YOLO] 恢复所有钓鱼过程采集图像")
+
     def _on_yolo_device_change(self, _event=None):
         """切换 YOLO 推理设备"""
         dev = self.var_yolo_device.get()
@@ -809,6 +838,14 @@ class FishingApp:
         # 更新状态
         self.var_state.set(self.bot.state)
         self.var_count.set(str(self.bot.fish_count))
+
+        # 更新成功率显示
+        total = self.bot.success_count + self.bot.fail_count
+        if total > 0:
+            rate = self.bot.success_count / total * 100
+            self.var_success_rate.set(f"{self.bot.success_count}/{total} ({rate:.1f}%)")
+        else:
+            self.var_success_rate.set("0/0 (0%)")
 
         # 状态颜色
         if self.bot.running:

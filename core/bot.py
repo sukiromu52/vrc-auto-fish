@@ -72,6 +72,8 @@ class FishingBot:
         self.running    = False
         self.debug_mode = False
         self.fish_count = 0
+        self.success_count = 0       # 钓鱼成功次数
+        self.fail_count = 0          # 钓鱼失败次数
         self.state      = "就绪"
 
         # ── PD 控制器状态 ──
@@ -642,16 +644,22 @@ class FishingBot:
                         fish_detect_name = ""
 
                     # YOLO 数据采集: 保存完整窗口画面（不裁剪ROI）
-                    if config.YOLO_COLLECT and frame % 10 == 0:
-                        _cdir = os.path.join(
-                            config.BASE_DIR, "yolo", "dataset",
-                            "images", "unlabeled")
-                        os.makedirs(_cdir, exist_ok=True)
-                        _ts = time.strftime("%Y%m%d_%H%M%S")
-                        _ms = int((time.time() % 1) * 1000)
-                        cv2.imwrite(
-                            os.path.join(_cdir, f"{_ts}_{_ms:03d}.png"),
-                            screen)
+                    # 仅在非"失败采集模式"时正常采集，每60秒保存一次
+                    _now = time.time()
+                    if config.YOLO_COLLECT and not config.YOLO_COLLECT_ON_FAIL:
+                        if not hasattr(self, '_yolo_last_collect_time'):
+                            self._yolo_last_collect_time = 0
+                        if _now - self._yolo_last_collect_time >= 60:
+                            self._yolo_last_collect_time = _now
+                            _cdir = os.path.join(
+                                config.BASE_DIR, "yolo", "dataset",
+                                "images", "unlabeled")
+                            os.makedirs(_cdir, exist_ok=True)
+                            _ts = time.strftime("%Y%m%d_%H%M%S")
+                            _ms = int((_now % 1) * 1000)
+                            cv2.imwrite(
+                                os.path.join(_cdir, f"{_ts}_{_ms:03d}.png"),
+                                screen)
 
                 else:
                     # ──── 模板匹配: 原有逻辑 ────
@@ -1095,6 +1103,23 @@ class FishingBot:
                     log.info("[🎣 收杆] 钓鱼成功, 点击收杆")
                 else:
                     log.info("[🎣 失败] 鱼竿已自动收回, 跳过收杆")
+                    # YOLO 仅在失败时采集图像
+                    if config.YOLO_COLLECT and config.YOLO_COLLECT_ON_FAIL:
+                        try:
+                            _cdir = os.path.join(
+                                config.BASE_DIR, "yolo", "dataset",
+                                "images", "unlabeled")
+                            os.makedirs(_cdir, exist_ok=True)
+                            _ts = time.strftime("%Y%m%d_%H%M%S")
+                            _ms = int((time.time() % 1) * 1000)
+                            # 保存失败时的屏幕截图
+                            _fail_screen = self._grab()
+                            cv2.imwrite(
+                                os.path.join(_cdir, f"fail_{_ts}_{_ms:03d}.png"),
+                                _fail_screen)
+                            log.info(f"[YOLO] 已保存失败图像 fail_{_ts}_{_ms:03d}.png")
+                        except Exception as e:
+                            log.warning(f"[YOLO] 保存失败图像异常: {e}")
 
         return success
 
@@ -1822,8 +1847,14 @@ class FishingBot:
                 result = self._fishing_minigame()
 
                 self.fish_count += 1
-                tag = "成功 ✅" if result else "完成"
-                log.info(f"[🎣 结果] 第 {self.fish_count} 次钓鱼 — {tag}")
+                if result:
+                    self.success_count += 1
+                    tag = "成功 ✅"
+                else:
+                    self.fail_count += 1
+                    tag = "失败 ❌"
+                log.info(f"[🎣 结果] 第 {self.fish_count} 次钓鱼 — {tag} "
+                         f"(累计: 成功{self.success_count}/失败{self.fail_count})")
                 log.info("─" * 40)
 
                 self.state = "等待下一轮"

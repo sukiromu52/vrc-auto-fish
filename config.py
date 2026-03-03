@@ -36,7 +36,7 @@ HOTKEY_DEBUG  = "F11"
 # ═══════════════════════════════════════════════════════════
 CAST_DELAY          = 1.5         # 抛竿后等待
 BITE_TIMEOUT        = 60.0        # 最长等鱼时间 (绝对上限)
-BITE_FORCE_HOOK     = 18.0        # N秒无咬钩 → 强制提竿进入小游戏 (防漏检)
+BITE_FORCE_HOOK     = 0.500       # N秒无咬钩 → 强制提竿进入小游戏 (防漏检)
 BITE_CHECK_INTERVAL = 0.15        # 咬钩检测间隔
 MIN_BITE_WAIT       = 3.0         # 最少等待N秒才开始检测咬钩（防止误检）
 COLOR_BITE_WAIT     = 6.0         # N秒后才启用颜色检测（模板优先）
@@ -55,10 +55,10 @@ FISH_LOST_LIMIT     = 120          # 连续N帧鱼消失 → 游戏可能结束
 SINGLE_OBJ_TIMEOUT  = 5.0         # ★ 鱼或条单独消失超过N秒 → 判定失败收杆 (3→5)
 OBJ_MIN_COUNT       = 1            # ★ 每帧至少检测到N个对象才继续 (2→1, 只要鱼或条任一即可)
 OBJ_GONE_LIMIT      = 80           # ★ 连续N帧对象不足 → 游戏结束 (25→80)
-POST_CATCH_DELAY    = 3.0         # 钓鱼结束/失败后等待(秒), 收杆→等待→摇头→抛竿
-SHAKE_HEAD_TIME     = 0.02        # 摇头每段按住时长(秒)
+POST_CATCH_DELAY    = 2.800       # 钓鱼结束/失败后等待(秒), 收杆→等待→摇头→抛竿
+SHAKE_HEAD_TIME     = 0.0300      # 摇头每段按住时长(秒)
 INITIAL_PRESS_TIME  = 0.2         # 开局按压时长(秒)
-SUCCESS_PROGRESS    = 0.55        # 进度条 > 此值判定钓鱼成功 (0~1)
+SUCCESS_PROGRESS    = 0.42        # 进度条 > 此值判定钓鱼成功 (0~1)
 MINIGAME_TIMEOUT    = 120.0       # 小游戏最长持续时间 (秒), 超过强制结束
 UI_CHECK_FRAMES     = 30           # 每N帧检查一次轨道是否还在 (15→30, 降低检查频率)
 UI_GONE_LIMIT       = 4            # 连续N次轨道检查失败 → 判定游戏结束 (2→4)
@@ -90,14 +90,14 @@ FISH_GAME_SIZE = 30
 #  小游戏控制
 # ═══════════════════════════════════════════════════════════
 # ── PD 控制器参数 (适配高惯性钓鱼) ──
-DEAD_ZONE       = 15              # 固定死区(px), 备用 (动态死区优先)
+DEAD_ZONE       = 12              # 固定死区(px), 备用 (动态死区优先)
 DEAD_ZONE_RATIO = 0.35            # 动态死区: 白条高度 × 此比例 (鱼在白条中心此范围内=居中)
 MAINTAIN_TAP_S  = 0.010           # 死区内维持性短按时长(秒), 抵消重力防坠底
-HOLD_MIN_S      = 0.025           # 抗重力基准 (秒) — 越小下降越快
+HOLD_MIN_S      = 0.015           # 抗重力基准 (秒) — 越小下降越快
 HOLD_MAX_S      = 0.100           # 单次最长按住 (秒)
 HOLD_GAIN       = 0.040           # 位置增益: 误差×增益=额外按住时长
 VELOCITY_SMOOTH = 0.5             # 速度低通滤波系数 (0~1, 越大越平滑)
-PREDICT_AHEAD   = 0.5             # 前瞻时间 (秒) — 高惯性系统需要更远的预判
+PREDICT_AHEAD   = 0.400           # 前瞻时间 (秒) — 高惯性系统需要更远的预判
 SPEED_DAMPING   = 0.00025         # 速度阻尼: 下坠快时加按住, 上升快时减按住
 MAX_FISH_BAR_DIST = 300           # ★ 鱼和白条中心最大合理距离(px), 超过视为误检
 REGION_UP         = 300           # 白条锁定后, 向上搜索像素数
@@ -107,6 +107,11 @@ USE_OSC           = True           # True=OSC输入(不占鼠标), False=PostMes
 DETECT_ROI        = None           # 玩家框选的检测区域 [x, y, w, h], None=全屏搜索
 
 # ═══════════════════════════════════════════════════════════
+#  安全保护功能
+# ═══════════════════════════════════════════════════════════
+PAUSE_ON_MOUSE_ZERO = False          # True=检测到鼠标在(0,0)坐标时自动暂停钓鱼线程
+
+# ═══════════════════════════════════════════════════════════
 #  YOLO 目标检测 (替代模板匹配, 需训练后使用)
 # ═══════════════════════════════════════════════════════════
 USE_YOLO      = True
@@ -114,6 +119,7 @@ YOLO_MODEL    = os.path.join(BASE_DIR, "yolo", "runs", "fish_detect", "weights",
 YOLO_CONF     = 0.45              # YOLO 检测置信度阈值
 YOLO_DEVICE   = "auto"            # "auto" 优先GPU / "cpu" 强制CPU / "gpu" 强制GPU
 YOLO_COLLECT  = False             # True=钓鱼时自动保存截图用于训练
+YOLO_COLLECT_ON_FAIL = False      # True=仅在钓鱼失败时采集图像
 TRACK_MIN_ANGLE   = 3.0           # 轨道倾斜角度阈值(度), 超过此值启用旋转补偿
 TRACK_MAX_ANGLE   = 45.0          # 轨道最大合理角度(度), 超过视为误检(如把海平线当轨道)
 
