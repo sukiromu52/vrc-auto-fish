@@ -1103,8 +1103,8 @@ class FishingBot:
                     log.info("[🎣 收杆] 钓鱼成功, 点击收杆")
                 else:
                     log.info("[🎣 失败] 鱼竿已自动收回, 跳过收杆")
-                    # YOLO 仅在失败时采集图像
-                    if config.YOLO_COLLECT and config.YOLO_COLLECT_ON_FAIL:
+                    # YOLO 仅在失败时采集图像（无需勾选"采集数据"，独立开关）
+                    if config.YOLO_COLLECT_ON_FAIL:
                         try:
                             _cdir = os.path.join(
                                 config.BASE_DIR, "yolo", "dataset",
