@@ -137,6 +137,50 @@ class FishingBot:
             return self._rotate_for_detection(img)
         return img
 
+    def _calculate_track_angle(self, track_box):
+        """
+        计算钓鱼轨道的倾斜角度。
+        
+        参数:
+            track_box: 轨道边界框 (x, y, w, h)
+        返回:
+            轨道倾斜角度（度），正数表示向右倾斜，负数表示向左倾斜
+        """
+        import numpy as np
+        
+        if track_box is None or len(track_box) < 4:
+            return 0.0
+        
+        x, y, w, h = track_box
+        
+        # 如果轨道高度远大于宽度（正常垂直轨道），计算长轴角度
+        if h > w * 2:  # 轨道应该是细长的
+            # 使用最小外接矩形计算角度
+            # 创建轨道区域的点集（简化：使用四个角点）
+            pts = np.array([
+                [x, y],
+                [x + w, y],
+                [x + w, y + h],
+                [x, y + h]
+            ], dtype=np.float32)
+            
+            # 计算最小外接矩形
+            try:
+                (cx, cy), (bw, bh), angle = cv2.minAreaRect(pts)
+                # minAreaRect返回的角度是-90到0之间
+                # 需要转换为实际倾斜角度
+                if bw < bh:
+                    angle = angle + 90
+                
+                # 限制角度范围在 -45 到 45 度之间（超过视为检测错误）
+                if abs(angle) > 45:
+                    return 0.0
+                return angle
+            except Exception:
+                return 0.0
+        
+        return 0.0
+
     def _rotate_for_detection(self, screen):
         """
         旋转图像使倾斜的钓鱼轨道变为垂直方向。
@@ -285,7 +329,8 @@ class FishingBot:
                         track_cx = yt[0] + yt[2] // 2
                         if abs(bar_cx - track_cx) < 150:
                             found = True
-                            detected_angle = 0.0
+                            # ★ 计算轨道倾斜角度
+                            detected_angle = self._calculate_track_angle(yt)
                 except Exception:
                     pass
 
@@ -307,7 +352,8 @@ class FishingBot:
                 if bar_cx is not None and track_cx is not None:
                     if abs(bar_cx - track_cx) < 150:
                         found = True
-                        detected_angle = 0.0
+                        # ★ 计算轨道倾斜角度
+                        detected_angle = self._calculate_track_angle(track)
 
             if found:
                 hit_count += 1
