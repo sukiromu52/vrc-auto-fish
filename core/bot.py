@@ -619,7 +619,7 @@ class FishingBot:
                     break
 
                 # ════════════ 定期检查 UI 是否还存在 ════════════
-                if frame % config.UI_CHECK_FRAMES == 0 and frame > 10:
+                if frame % config.UI_CHECK_FRAMES == 0 and frame > 200:
                     if _use_yolo:
                         _tc = self.yolo.detect(screen, config.DETECT_ROI)
                         track_check = _tc["track"]
