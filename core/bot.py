@@ -95,6 +95,12 @@ class FishingBot:
         self._track_angle   = 0.0        # 轨道偏转角度 (度)
         self._need_rotation = False      # 是否需要旋转补偿
 
+        # ── 强制重置计数器 ──
+        self._retry_no_minigame_count = 0   # 连续未检测到小游戏次数
+        self._force_reset_count = 0         # 本次会话强制重置总次数
+        self._force_reset_log = []          # 强制重置日志列表 [(timestamp, count), ...]
+        self._load_force_reset_log()        # 加载历史日志
+
         # ── 鱼/白条位置平滑 (减少检测抖动) ──
         self._fish_smooth_cy = None      # 平滑后的鱼中心 Y
         self._current_fish_name = ""     # 当前检测到的鱼模板名 (如 "fish_blue")
@@ -151,7 +157,7 @@ class FishingBot:
         if track_box is None or len(track_box) < 4:
             return 0.0
         
-        x, y, w, h = track_box
+        x, y, w, h = track_box[:4]
         
         # 如果轨道高度远大于宽度（正常垂直轨道），计算长轴角度
         if h > w * 2:  # 轨道应该是细长的
@@ -180,6 +186,52 @@ class FishingBot:
                 return 0.0
         
         return 0.0
+
+    def _load_force_reset_log(self):
+        """加载强制重置日志"""
+        import json
+        import os
+        try:
+            if os.path.exists(config.FORCE_RESET_LOG_FILE):
+                with open(config.FORCE_RESET_LOG_FILE, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    if isinstance(data, list):
+                        self._force_reset_log = data
+                        self._force_reset_count = len(data)
+        except Exception:
+            self._force_reset_log = []
+            self._force_reset_count = 0
+
+    def _save_force_reset_log(self):
+        """保存强制重置日志"""
+        import json
+        try:
+            with open(config.FORCE_RESET_LOG_FILE, 'w', encoding='utf-8') as f:
+                json.dump(self._force_reset_log, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            log.warning(f"[强制重置] 保存日志失败: {e}")
+
+    def _record_force_reset(self):
+        """记录一次强制重置"""
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self._force_reset_count += 1
+        self._force_reset_log.append({
+            "timestamp": timestamp,
+            "count": self._force_reset_count
+        })
+        self._save_force_reset_log()
+        return timestamp
+
+    def get_force_reset_log(self):
+        """获取强制重置日志（供GUI调用）"""
+        return self._force_reset_log.copy()
+
+    def clear_force_reset_log(self):
+        """清空强制重置日志"""
+        self._force_reset_log = []
+        self._force_reset_count = 0
+        self._save_force_reset_log()
 
     def _rotate_for_detection(self, screen):
         """
@@ -1880,12 +1932,31 @@ class FishingBot:
 
                     # ★ 验证小游戏是否真的出现了
                     if not self._verify_minigame():
-                        wait = config.POST_CATCH_DELAY
-                        log.info(f"[🔄 重试] 未检测到小游戏, 收杆后等待{wait:.1f}s重新抛竿")
-                        self.input.click()
-                        time.sleep(wait)
+                        self._retry_no_minigame_count += 1
+                        
+                        # 检查是否达到强制重置条件
+                        if (config.ENABLE_FORCE_RESET and 
+                            self._retry_no_minigame_count >= config.MAX_RETRY_NO_MINIGAME):
+                            wait = config.FORCE_RESET_DELAY
+                            timestamp = self._record_force_reset()  # 记录日志
+                            log.warning(f"[⚠️ 强制重置] 连续{self._retry_no_minigame_count}次未检测到小游戏, "
+                                      f"等待{wait:.1f}s让游戏自动重置...")
+                            log.info(f"[📋 记录] 第 {self._force_reset_count} 次强制重置 @ {timestamp}")
+                            self.input.click()
+                            time.sleep(wait)
+                            self._retry_no_minigame_count = 0  # 重置计数器
+                            log.info("[🔄 继续] 强制重置完成, 重新抛竿")
+                        else:
+                            wait = config.POST_CATCH_DELAY
+                            log.info(f"[🔄 重试] 未检测到小游戏({self._retry_no_minigame_count}/"
+                                     f"{config.MAX_RETRY_NO_MINIGAME}), 收杆后等待{wait:.1f}s重新抛竿")
+                            self.input.click()
+                            time.sleep(wait)
                         log.info("─" * 40)
                         continue
+                    else:
+                        # 检测到小游戏，重置计数器
+                        self._retry_no_minigame_count = 0
 
                 if not self.running:
                     break

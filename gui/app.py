@@ -128,9 +128,18 @@ class FishingApp:
         ttk.Label(frm_status, textvariable=self.var_success_rate).grid(
             row=3, column=1, **grid_pad)
 
-        ttk.Label(frm_status, text="调试模式:").grid(row=4, column=0, **grid_pad)
+        # 强制重置统计
+        self.var_force_reset_count = tk.StringVar(value="0次")
+        ttk.Label(frm_status, text="强制重置:").grid(row=4, column=0, **grid_pad)
+        frm_reset = ttk.Frame(frm_status)
+        frm_reset.grid(row=4, column=1, **grid_pad)
+        ttk.Label(frm_reset, textvariable=self.var_force_reset_count).pack(side="left")
+        ttk.Button(frm_reset, text="查看日志", command=self._on_view_reset_log,
+                   width=8).pack(side="left", padx=(5, 0))
+
+        ttk.Label(frm_status, text="调试模式:").grid(row=5, column=0, **grid_pad)
         ttk.Label(frm_status, textvariable=self.var_debug).grid(
-            row=4, column=1, **grid_pad)
+            row=5, column=1, **grid_pad)
 
         # ── 中间：控制按钮 ──
         frm_ctrl = ttk.Frame(self.root)
@@ -182,6 +191,11 @@ class FishingApp:
         ttk.Checkbutton(frm_toggles, text="Debug窗口",
                         variable=self.var_show_debug,
                         command=self._on_debug_toggle).pack(side="left", padx=5)
+
+        self.var_force_reset = tk.BooleanVar(value=config.ENABLE_FORCE_RESET)
+        ttk.Checkbutton(frm_toggles, text="强制重置",
+                        variable=self.var_force_reset,
+                        command=self._on_force_reset_toggle).pack(side="left", padx=5)
 
         # ── YOLO 控制区 ──
         frm_yolo = ttk.LabelFrame(self.root, text=" YOLO 目标检测 ")
@@ -421,6 +435,7 @@ class FishingApp:
         data["YOLO_DEVICE"] = config.YOLO_DEVICE
         data["SHOW_DEBUG"] = config.SHOW_DEBUG
         data["FISH_WHITELIST"] = config.FISH_WHITELIST
+        data["ENABLE_FORCE_RESET"] = config.ENABLE_FORCE_RESET
         try:
             with open(config.SETTINGS_FILE, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
@@ -480,6 +495,11 @@ class FishingApp:
                 elif attr == "FISH_WHITELIST":
                     if isinstance(val, dict):
                         config.FISH_WHITELIST.update(val)
+                    loaded.append(attr)
+                elif attr == "ENABLE_FORCE_RESET":
+                    config.ENABLE_FORCE_RESET = bool(val)
+                    if hasattr(self, 'var_force_reset'):
+                        self.var_force_reset.set(config.ENABLE_FORCE_RESET)
                     loaded.append(attr)
                 elif attr in self._param_vars:
                     setattr(config, attr, val)
@@ -677,6 +697,92 @@ class FishingApp:
             except Exception:
                 pass
 
+    def _on_force_reset_toggle(self):
+        """切换强制重置功能"""
+        config.ENABLE_FORCE_RESET = self.var_force_reset.get()
+        self._save_settings()
+        state = "启用" if config.ENABLE_FORCE_RESET else "禁用"
+        self._log_msg(f"[设置] 强制重置功能: {state} "
+                      f"(连续{config.MAX_RETRY_NO_MINIGAME}次未检测到小游戏等待{config.FORCE_RESET_DELAY}s)")
+
+    def _on_view_reset_log(self):
+        """查看强制重置日志弹窗"""
+        log_window = tk.Toplevel(self.root)
+        log_window.title("强制重置日志")
+        log_window.geometry("400x500")
+        log_window.transient(self.root)  # 设置为父窗口的子窗口
+        log_window.grab_set()  # 模态窗口
+        
+        # 标题
+        ttk.Label(log_window, text="强制重置记录", font=("", 12, "bold")).pack(pady=10)
+        
+        # 日志列表
+        frm_list = ttk.Frame(log_window)
+        frm_list.pack(fill="both", expand=True, padx=10, pady=5)
+        
+        # 获取日志
+        reset_log = self.bot.get_force_reset_log()
+        
+        if not reset_log:
+            ttk.Label(frm_list, text="暂无强制重置记录", foreground="gray").pack(pady=20)
+        else:
+            # 表头
+            frm_header = ttk.Frame(frm_list)
+            frm_header.pack(fill="x", pady=(0, 5))
+            ttk.Label(frm_header, text="序号", width=8).pack(side="left")
+            ttk.Label(frm_header, text="重置时间", width=20).pack(side="left")
+            
+            # 分隔线
+            ttk.Separator(frm_list, orient="horizontal").pack(fill="x")
+            
+            # 滚动区域
+            canvas = tk.Canvas(frm_list)
+            scrollbar = ttk.Scrollbar(frm_list, orient="vertical", command=canvas.yview)
+            scroll_frame = ttk.Frame(canvas)
+            
+            scroll_frame.bind(
+                "<Configure>",
+                lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+            )
+            
+            canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
+            canvas.configure(yscrollcommand=scrollbar.set)
+            
+            # 填充数据（倒序显示，最新的在前）
+            for entry in reversed(reset_log):
+                row = ttk.Frame(scroll_frame)
+                row.pack(fill="x", pady=2)
+                ttk.Label(row, text=f"#{entry['count']}", width=8).pack(side="left")
+                ttk.Label(row, text=entry['timestamp'], width=20).pack(side="left")
+            
+            canvas.pack(side="left", fill="both", expand=True)
+            scrollbar.pack(side="right", fill="y")
+        
+        # 统计信息
+        ttk.Separator(log_window, orient="horizontal").pack(fill="x", padx=10, pady=5)
+        frm_stats = ttk.Frame(log_window)
+        frm_stats.pack(fill="x", padx=10, pady=5)
+        ttk.Label(frm_stats, text=f"总计: {len(reset_log)} 次", font=("", 10, "bold")).pack(side="left")
+        
+        # 按钮区域
+        frm_buttons = ttk.Frame(log_window)
+        frm_buttons.pack(fill="x", padx=10, pady=10)
+        
+        ttk.Button(frm_buttons, text="清空日志",
+                   command=lambda: self._on_clear_reset_log(log_window)).pack(side="left", padx=5)
+        ttk.Button(frm_buttons, text="关闭",
+                   command=log_window.destroy).pack(side="right", padx=5)
+
+    def _on_clear_reset_log(self, parent_window=None):
+        """清空强制重置日志"""
+        import tkinter.messagebox as msgbox
+        if msgbox.askyesno("确认", "确定要清空所有强制重置日志吗？"):
+            self.bot.clear_force_reset_log()
+            self.var_force_reset_count.set("0次")
+            self._log_msg("[日志] 强制重置日志已清空")
+            if parent_window:
+                parent_window.destroy()
+
     def _preload_yolo(self):
         """后台线程预加载 YOLO 模型，避免阻塞 GUI"""
         def _load():
@@ -846,6 +952,9 @@ class FishingApp:
             self.var_success_rate.set(f"{self.bot.success_count}/{total} ({rate:.1f}%)")
         else:
             self.var_success_rate.set("0/0 (0%)")
+
+        # 更新强制重置次数
+        self.var_force_reset_count.set(f"{self.bot._force_reset_count}次")
 
         # 状态颜色
         if self.bot.running:
