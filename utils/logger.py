@@ -12,6 +12,8 @@ import queue
 class Logger:
     """日志器 — 控制台打印 + queue 推送 + 内存缓存(供保存)"""
 
+    _MAX_LINES = 5000   # 内存缓存上限: 超过后保留最新一半 (防长时间运行内存增长)
+
     def __init__(self):
         self.log_queue: queue.Queue = queue.Queue()
         self._lines: list[str] = []
@@ -33,6 +35,9 @@ class Logger:
         line = f"[{ts}][{level:>5s}] {msg}"
         print(line)
         self._lines.append(line)
+        # 超过上限时淘汰最旧一半, 保留最新的 _MAX_LINES // 2 条
+        if len(self._lines) > self._MAX_LINES:
+            self._lines = self._lines[self._MAX_LINES // 2:]
         try:
             self.log_queue.put_nowait(line)
         except queue.Full:

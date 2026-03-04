@@ -101,6 +101,11 @@ class FishingBot:
         self._bar_locked_cx  = None      # ★ 轨道X轴锁定 (白条+鱼共用)
         self._pool = ThreadPoolExecutor(max_workers=2)
 
+        # ── 非阻塞按键线程 (PD 控制器专用) ──
+        self._hold_until: float = 0.0        # 按住截止时间戳 (epoch秒)
+        self._input_running: bool = False    # 线程运行标志
+        self._input_thread: threading.Thread = None
+
         # ── 行为克隆 ──
         self._il_history = deque(maxlen=config.IL_HISTORY_LEN)
         self._il_writer = None       # CSV writer (录制模式)
@@ -142,7 +147,7 @@ class FishingBot:
         计算钓鱼轨道的倾斜角度。
         
         参数:
-            track_box: 轨道边界框 (x, y, w, h)
+            track_box: 轨道边界框 (x, y, w, h) 或 (x, y, w, h, conf)
         返回:
             轨道倾斜角度（度），正数表示向右倾斜，负数表示向左倾斜
         """
@@ -151,7 +156,8 @@ class FishingBot:
         if track_box is None or len(track_box) < 4:
             return 0.0
         
-        x, y, w, h = track_box
+        # 处理YOLO返回的 (x, y, w, h, conf) 格式或模板匹配的 (x, y, w, h) 格式
+        x, y, w, h = track_box[0], track_box[1], track_box[2], track_box[3]
         
         # 如果轨道高度远大于宽度（正常垂直轨道），计算长轴角度
         if h > w * 2:  # 轨道应该是细长的
@@ -481,6 +487,7 @@ class FishingBot:
         hold_count = 0         # 按住次数
         success = False
         _skip_fish = False     # ★ 白名单跳过标志: 非目标鱼→放弃控制
+        _use_input_thread = False  # ★ 非阻塞按键线程标志 (在 try 之前需初始化防 NameError)
         _fish_id_saved = False # ★ 鱼种识别截图只保存一次
         self._progress_debug_saved = False  # ★ 进度条截图只保存一次
         minigame_start = time.time()   # ★ 计时: 超时强制结束
@@ -575,6 +582,11 @@ class FishingBot:
             time.sleep(press_t)
             self.input.mouse_up()
 
+        # ★ 启动非阻塞按键线程 (PD 模式: 非录制 + 非IL模型推理)
+        _use_input_thread = (not config.IL_RECORD and not config.IL_USE_MODEL)
+        if _use_input_thread:
+            self._start_input_thread()
+
         _last_progress_sr = None
         _last_track_w = None
         _last_green = 0.0
@@ -647,7 +659,7 @@ class FishingBot:
                     else:
                         no_detect += 1
                         if no_detect > 5:
-                            self.input.mouse_up()
+                            self._hold_until = 0.0   # 通知输入线程立即释放
                         if no_detect > config.TRACK_LOST_LIMIT:
                             log.info(
                                 f"[📋 结束] 连续{no_detect}帧未检测到"
@@ -997,7 +1009,7 @@ class FishingBot:
                 if fish is None and bar is None:
                     no_detect += 1
                     if no_detect > 5 and not config.IL_RECORD:
-                        self.input.mouse_up()
+                        self._hold_until = 0.0   # 通知输入线程立即释放
 
                     if no_detect == 10:
                         log.warning(
@@ -1085,7 +1097,7 @@ class FishingBot:
 
                 # ════════════ ★ 控制 (录制 / 模型 / PD) ════════════
                 if _skip_fish:
-                    self.input.mouse_up()
+                    self._hold_until = 0.0   # 通知输入线程立即释放
                     held = False
                 elif config.IL_RECORD:
                     self._il_record_frame(frame, fish, bar)
@@ -1118,6 +1130,10 @@ class FishingBot:
                 time.sleep(config.GAME_LOOP_INTERVAL)
 
         finally:
+            # ★ 最先停止按键线程，确保鼠标在后续逻辑前已释放
+            if _use_input_thread:
+                self._stop_input_thread()
+
             if _skip_fish:
                 success = False
                 log.info(
@@ -1357,6 +1373,46 @@ class FishingBot:
             cv2.destroyWindow("Debug Overlay")
         except Exception:
             pass
+
+    # ══════════════════════════════════════════════════════
+    #  非阻塞按键线程 (PD 控制器专用)
+    # ══════════════════════════════════════════════════════
+
+    def _start_input_thread(self):
+        """
+        启动独立按键线程，解除 PD 控制器 sleep 对检测循环的阻塞。
+
+        原理:
+          主循环只设置 self._hold_until = time.time() + hold_s，
+          本线程以 ~2ms 精度轮询该时间戳，决定调用 mouse_down 还是 mouse_up。
+          检测循环无需等待按键完成即可继续截图+检测，消除帧率瓶颈。
+        """
+        self._input_running = True
+        self._hold_until = 0.0
+        self._input_thread = threading.Thread(
+            target=self._input_loop, daemon=True, name="FishInputThread"
+        )
+        self._input_thread.start()
+        log.info("[输入线程] ✓ 已启动 (2ms 精度, 非阻塞 PD 模式)")
+
+    def _stop_input_thread(self):
+        """停止按键线程并确保鼠标已释放。"""
+        self._input_running = False
+        self._hold_until = 0.0          # 强制下次轮询时释放
+        self.input.mouse_up()           # 立即兜底释放
+        if self._input_thread and self._input_thread.is_alive():
+            self._input_thread.join(timeout=0.5)
+        self._input_thread = None
+        log.info("[输入线程] 已停止")
+
+    def _input_loop(self):
+        """按键线程主体: ~2ms 轮询, 精确控制按住/松开。"""
+        while self._input_running:
+            if time.time() < self._hold_until:
+                self.input.mouse_down()
+            else:
+                self.input.mouse_up()
+            time.sleep(0.002)
 
     # ══════════════════════════════════════════════════════
     #  小游戏辅助
@@ -1775,16 +1831,14 @@ class FishingBot:
                      if self._current_fish_name else "?")
 
             if hold >= MIN_HOLD + 0.001:
-                self.input.mouse_down()
-                time.sleep(hold)
-                self.input.mouse_up()
+                self._hold_until = time.time() + hold   # ★ 非阻塞: 仅设置截止时间
                 log.info(
                     f"  ● [{fname}] fib={fish_in_bar:.2f} "
                     f"v={vel:+.0f} → 按 {hold*1000:.0f}ms"
                 )
                 return True
             else:
-                self.input.mouse_up()
+                self._hold_until = 0.0                  # ★ 非阻塞: 通知线程释放
                 log.info(
                     f"  ○ [{fname}] fib={fish_in_bar:.2f} "
                     f"v={vel:+.0f} → 释放"
@@ -1812,16 +1866,14 @@ class FishingBot:
                 mid_y = fish_cy
             if fish_cy < mid_y:
                 h = min(fallback * 1.5, MAX_HOLD)
-                self.input.mouse_down()
-                time.sleep(h)
-                self.input.mouse_up()
+                self._hold_until = time.time() + h      # ★ 非阻塞
                 log.info(
                     f"  (仅鱼) Y={fish_cy} v={vel:+.0f}"
                     f" → 按 {h*1000:.0f}ms"
                 )
                 return True
             else:
-                self.input.mouse_up()
+                self._hold_until = 0.0                  # ★ 非阻塞
                 return False
 
         elif bar is not None:
@@ -1835,9 +1887,7 @@ class FishingBot:
                 hold = max(MIN_HOLD, min(hold, MAX_HOLD))
             else:
                 hold = fallback
-            self.input.mouse_down()
-            time.sleep(hold)
-            self.input.mouse_up()
+            self._hold_until = time.time() + hold       # ★ 非阻塞
             log.info(
                 f"  (仅条) Y={bar_cy} v={vel:+.0f}"
                 f" → 按 {hold*1000:.0f}ms"

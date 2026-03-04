@@ -37,6 +37,7 @@ class ImageDetector:
     # ══════════════════ 模板加载 ══════════════════
 
     _TMPL_MAX_DIM = 9999  # 禁用裁剪: 保留完整模板以提高匹配准确度
+    _SCALE_CACHE_MAX = 200  # 缩放缓存上限: 超过后淘汰最旧一半 (防显存/内存缓慢增长)
 
     def _load_templates(self, img_dir: str, file_map: dict):
         pass  # 静默加载模板
@@ -317,6 +318,11 @@ class ImageDetector:
                             scaled_tmpl = np.ascontiguousarray(scaled_tmpl)
                             try:
                                 gpu_tmpl_s = cv2.cuda_GpuMat(scaled_tmpl)
+                                if len(self._gpu_scaled_cache) >= self._SCALE_CACHE_MAX:
+                                    # 淘汰最旧一半，保留最近使用的条目
+                                    _keys = list(self._gpu_scaled_cache)
+                                    for _k in _keys[:len(_keys) // 2]:
+                                        del self._gpu_scaled_cache[_k]
                                 self._gpu_scaled_cache[_gkey] = gpu_tmpl_s
                             except Exception:
                                 max_val, max_loc = self._match_template(
@@ -387,6 +393,11 @@ class ImageDetector:
                         scaled_tmpl = cv2.resize(
                             tmpl, (new_tw, new_th),
                             interpolation=cv2.INTER_LINEAR)
+                        if len(self._scaled_cache) >= self._SCALE_CACHE_MAX:
+                            # 淘汰最旧一半，保留最近使用的条目
+                            _keys = list(self._scaled_cache)
+                            for _k in _keys[:len(_keys) // 2]:
+                                del self._scaled_cache[_k]
                         self._scaled_cache[_ckey] = scaled_tmpl
                     max_val, max_loc = self._match_template(
                         img_gray, scaled_tmpl)
