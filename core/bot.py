@@ -99,7 +99,7 @@ class FishingBot:
         self._retry_no_minigame_count = 0   # 连续未检测到小游戏次数
         self._force_reset_count = 0         # 本次会话强制重置总次数
         self._force_reset_log = []          # 强制重置日志列表 [(timestamp, count), ...]
-        self._load_force_reset_log()        # 加载历史日志
+        # ★ 不再持久化到文件，仅记录当前窗口的统计
 
         # ── 鱼/白条位置平滑 (减少检测抖动) ──
         self._fish_smooth_cy = None      # 平滑后的鱼中心 Y
@@ -187,30 +187,6 @@ class FishingBot:
         
         return 0.0
 
-    def _load_force_reset_log(self):
-        """加载强制重置日志"""
-        import json
-        import os
-        try:
-            if os.path.exists(config.FORCE_RESET_LOG_FILE):
-                with open(config.FORCE_RESET_LOG_FILE, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    if isinstance(data, list):
-                        self._force_reset_log = data
-                        self._force_reset_count = len(data)
-        except Exception:
-            self._force_reset_log = []
-            self._force_reset_count = 0
-
-    def _save_force_reset_log(self):
-        """保存强制重置日志"""
-        import json
-        try:
-            with open(config.FORCE_RESET_LOG_FILE, 'w', encoding='utf-8') as f:
-                json.dump(self._force_reset_log, f, indent=2, ensure_ascii=False)
-        except Exception as e:
-            log.warning(f"[强制重置] 保存日志失败: {e}")
-
     def _record_force_reset(self):
         """记录一次强制重置"""
         from datetime import datetime
@@ -220,7 +196,7 @@ class FishingBot:
             "timestamp": timestamp,
             "count": self._force_reset_count
         })
-        self._save_force_reset_log()
+        # ★ 不再保存到文件，仅保留在内存中
         return timestamp
 
     def get_force_reset_log(self):
@@ -231,7 +207,7 @@ class FishingBot:
         """清空强制重置日志"""
         self._force_reset_log = []
         self._force_reset_count = 0
-        self._save_force_reset_log()
+        # ★ 不再操作文件，仅清空内存中的数据
 
     def _rotate_for_detection(self, screen):
         """

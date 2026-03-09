@@ -18,35 +18,7 @@ import cv2
 import config
 from core.bot import FishingBot
 from utils.logger import log
-
-
-# ═══════════════════════════════════════════════════════════
-#  可调参数定义
-#  (显示名, config属性名, 类型, 单位提示)
-#  类型: "int" / "float" / "ms" (毫秒显示,秒存储)
-# ═══════════════════════════════════════════════════════════
-TUNABLE_PARAMS = [
-    ("强制提竿(s)",   "BITE_FORCE_HOOK",  "float", "等待N秒无咬钩则强制提竿进入小游戏"),
-    ("鱼像素大小",    "FISH_GAME_SIZE",   "int",   "游戏内鱼图标的大致像素,越小搜索倍率越高"),
-    ("死区(px)",      "DEAD_ZONE",        "int",   "越大越容易触发按住"),
-    ("抗重力基准(ms)","HOLD_MIN_S",       "ms",    "越小下降越快,越大越悬浮"),
-    ("最长按住(ms)",  "HOLD_MAX_S",       "ms",    "单次按住的最大时长"),
-    ("按住增益",      "HOLD_GAIN",        "float", "位置误差×增益=额外按住时长"),
-    ("前瞻时间(s)",   "PREDICT_AHEAD",    "float", "预测未来位置的时间"),
-    ("速度阻尼",      "SPEED_DAMPING",    "float", "下坠快加按住,上升快减按住"),
-    ("最大距离(px)",  "MAX_FISH_BAR_DIST","int",   "鱼条距离超过视为误检"),
-    ("速度平滑",      "VELOCITY_SMOOTH",  "float", "0~1, 越大越平滑"),
-    ("旋转阈值(°)",   "TRACK_MIN_ANGLE",  "float", "轨道倾斜超过此角度启用旋转"),
-    ("旋转上限(°)",   "TRACK_MAX_ANGLE",  "float", "超过此角度视为误检(如海平线)"),
-    ("搜索上(px)",    "REGION_UP",        "int",   "白条锁定后向上搜索的像素数"),
-    ("搜索下(px)",    "REGION_DOWN",      "int",   "白条锁定后向下搜索的像素数"),
-    ("搜索X(px)",     "REGION_X",         "int",   "白条中心左右各N像素范围内检测"),
-    ("归正时间(s)",   "POST_CATCH_DELAY", "float", "钓鱼结束/失败后等待N秒再抛竿"),
-    ("摇头时长(s)",   "SHAKE_HEAD_TIME",  "float", "摇头每段按住时长,0=不摇头"),
-    ("按压时间(s)",   "INITIAL_PRESS_TIME","float", "开局按压时长(开局延迟0.5s固定)"),
-    ("确认帧数",      "VERIFY_CONSECUTIVE","int",   "连续几帧检测到UI才确认小游戏开始"),
-    ("成功阈值(%)",   "SUCCESS_PROGRESS", "pct",   "进度条超过此百分比判定钓鱼成功"),
-]
+from utils import i18n
 
 
 class FishingApp:
@@ -54,10 +26,15 @@ class FishingApp:
 
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title("VRC auto fish 263302")
-        self.root.geometry("580x800")
+        
+        # ── 初始化语言 ──
+        self._current_lang = getattr(config, 'LANGUAGE', 'zh')
+        i18n.set_language(self._current_lang)
+        
+        self.root.title(i18n._("app_title"))
+        self.root.geometry("580x820")
         self.root.resizable(True, True)
-        self.root.minsize(520, 600)
+        self.root.minsize(520, 650)
         # ★ 默认不置顶 (用户可通过复选框开启)
         self.root.attributes("-topmost", False)
 
@@ -89,7 +66,7 @@ class FishingApp:
         # ── 关闭处理 ──
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
-        self._log_msg("GitHub: https://github.com/day123123123/vrc-auto-fish")
+        self._log_msg(i18n._("msg_github"))
 
     # ══════════════════════════════════════════════════════
     #  界面构建
@@ -98,63 +75,81 @@ class FishingApp:
     def _build_ui(self):
         pad = {"padx": 10, "pady": 5}
 
+        # ── 语言选择（最顶部）──
+        frm_lang = ttk.Frame(self.root)
+        frm_lang.pack(fill="x", padx=10, pady=(5, 0))
+        ttk.Label(frm_lang, text=i18n._("language")).pack(side="left")
+        self.var_language = tk.StringVar(value=self._current_lang)
+        cmb_lang = ttk.Combobox(frm_lang, textvariable=self.var_language,
+                                values=["zh", "en", "jp"],
+                                state="readonly", width=10)
+        cmb_lang.pack(side="left", padx=5)
+        cmb_lang.bind("<<ComboboxSelected>>", self._on_language_change)
+
         # ── 顶部：状态面板 ──
-        frm_status = ttk.LabelFrame(self.root, text=" 状态 ")
-        frm_status.pack(fill="x", **pad)
+        self.frm_status = ttk.LabelFrame(self.root, text=i18n._("status_group"))
+        self.frm_status.pack(fill="x", **pad)
 
         grid_pad = {"padx": 8, "pady": 3, "sticky": "w"}
 
-        self.var_state = tk.StringVar(value="就绪")
-        self.var_window = tk.StringVar(value="未连接")
+        self.var_state = tk.StringVar(value=i18n._("ready"))
+        self.var_window = tk.StringVar(value=i18n._("not_connected"))
         self.var_count = tk.StringVar(value="0")
-        self.var_debug = tk.StringVar(value="关闭")
+        self.var_debug = tk.StringVar(value=i18n._("debug_off"))  # 初始为关闭状态
 
-        ttk.Label(frm_status, text="运行状态:").grid(row=0, column=0, **grid_pad)
-        self.lbl_state = ttk.Label(frm_status, textvariable=self.var_state,
+        self.lbl_status_title = ttk.Label(self.frm_status, text=i18n._("running_status"))
+        self.lbl_status_title.grid(row=0, column=0, **grid_pad)
+        self.lbl_state = ttk.Label(self.frm_status, textvariable=self.var_state,
                                    foreground="gray")
         self.lbl_state.grid(row=0, column=1, **grid_pad)
 
-        ttk.Label(frm_status, text="VRChat窗口:").grid(row=1, column=0, **grid_pad)
-        self.lbl_window = ttk.Label(frm_status, textvariable=self.var_window)
+        self.lbl_window_title = ttk.Label(self.frm_status, text=i18n._("window_status"))
+        self.lbl_window_title.grid(row=1, column=0, **grid_pad)
+        self.lbl_window = ttk.Label(self.frm_status, textvariable=self.var_window)
         self.lbl_window.grid(row=1, column=1, **grid_pad)
 
-        ttk.Label(frm_status, text="钓鱼次数:").grid(row=2, column=0, **grid_pad)
-        ttk.Label(frm_status, textvariable=self.var_count).grid(
+        self.lbl_count_title = ttk.Label(self.frm_status, text=i18n._("fish_count"))
+        self.lbl_count_title.grid(row=2, column=0, **grid_pad)
+        ttk.Label(self.frm_status, textvariable=self.var_count).grid(
             row=2, column=1, **grid_pad)
 
         # 成功率统计
         self.var_success_rate = tk.StringVar(value="0/0 (0%)")
-        ttk.Label(frm_status, text="成功率:").grid(row=3, column=0, **grid_pad)
-        ttk.Label(frm_status, textvariable=self.var_success_rate).grid(
+        self.lbl_success_title = ttk.Label(self.frm_status, text=i18n._("success_rate"))
+        self.lbl_success_title.grid(row=3, column=0, **grid_pad)
+        ttk.Label(self.frm_status, textvariable=self.var_success_rate).grid(
             row=3, column=1, **grid_pad)
 
         # 强制重置统计
-        self.var_force_reset_count = tk.StringVar(value="0次")
-        ttk.Label(frm_status, text="强制重置:").grid(row=4, column=0, **grid_pad)
-        frm_reset = ttk.Frame(frm_status)
+        self.var_force_reset_count = tk.StringVar(value="0")
+        self.lbl_reset_title = ttk.Label(self.frm_status, text=i18n._("force_reset"))
+        self.lbl_reset_title.grid(row=4, column=0, **grid_pad)
+        frm_reset = ttk.Frame(self.frm_status)
         frm_reset.grid(row=4, column=1, **grid_pad)
         ttk.Label(frm_reset, textvariable=self.var_force_reset_count).pack(side="left")
-        ttk.Button(frm_reset, text="查看日志", command=self._on_view_reset_log,
-                   width=8).pack(side="left", padx=(5, 0))
+        self.btn_view_log = ttk.Button(frm_reset, text=i18n._("btn_view_log"),
+                   command=self._on_view_reset_log, width=8)
+        self.btn_view_log.pack(side="left", padx=(5, 0))
 
-        ttk.Label(frm_status, text="调试模式:").grid(row=5, column=0, **grid_pad)
-        ttk.Label(frm_status, textvariable=self.var_debug).grid(
+        self.lbl_debug_title = ttk.Label(self.frm_status, text=i18n._("debug_mode"))
+        self.lbl_debug_title.grid(row=5, column=0, **grid_pad)
+        ttk.Label(self.frm_status, textvariable=self.var_debug).grid(
             row=5, column=1, **grid_pad)
 
         # ── 中间：控制按钮 ──
         frm_ctrl = ttk.Frame(self.root)
         frm_ctrl.pack(fill="x", **pad)
 
-        self.btn_start = ttk.Button(frm_ctrl, text="▶ 开始 (F9)",
+        self.btn_start = ttk.Button(frm_ctrl, text=i18n._("btn_start"),
                                     command=self._on_start, width=15)
         self.btn_start.pack(side="left", padx=5)
 
-        self.btn_stop = ttk.Button(frm_ctrl, text="■ 停止 (F10)",
+        self.btn_stop = ttk.Button(frm_ctrl, text=i18n._("btn_stop"),
                                    command=self._on_stop, width=15,
                                    state="disabled")
         self.btn_stop.pack(side="left", padx=5)
 
-        self.btn_debug = ttk.Button(frm_ctrl, text="调试模式 (F11)",
+        self.btn_debug = ttk.Button(frm_ctrl, text=i18n._("btn_debug"),
                                     command=self._on_toggle_debug, width=15)
         self.btn_debug.pack(side="left", padx=5)
 
@@ -162,64 +157,69 @@ class FishingApp:
         frm_aux = ttk.Frame(self.root)
         frm_aux.pack(fill="x", **pad)
 
-        self.btn_connect = ttk.Button(frm_aux, text="🔗 连接窗口",
+        self.btn_connect = ttk.Button(frm_aux, text=i18n._("btn_connect"),
                                       command=self._on_connect, width=15)
         self.btn_connect.pack(side="left", padx=5)
 
-        self.btn_screenshot = ttk.Button(frm_aux, text="📸 保存截图",
+        self.btn_screenshot = ttk.Button(frm_aux, text=i18n._("btn_screenshot"),
                                          command=self._on_screenshot, width=15)
         self.btn_screenshot.pack(side="left", padx=5)
 
-        self.btn_clearlog = ttk.Button(frm_aux, text="🗑 清空日志",
+        self.btn_clearlog = ttk.Button(frm_aux, text=i18n._("btn_clear_log"),
                                        command=self._on_clear_log, width=12)
         self.btn_clearlog.pack(side="left", padx=5)
 
-        self.btn_whitelist = ttk.Button(frm_aux, text="🐟 白名单",
+        self.btn_whitelist = ttk.Button(frm_aux, text=i18n._("btn_whitelist"),
                                         command=self._on_whitelist, width=12)
         self.btn_whitelist.pack(side="left", padx=5)
 
-        # ── 开关选项（独立一行，防窗口太窄时被挤掉） ──
+        # ── 开关选项（独立一行，防窗口太窄时被挤掉）──
         frm_toggles = ttk.Frame(self.root)
         frm_toggles.pack(fill="x", **pad)
 
         self.var_topmost = tk.BooleanVar(value=False)
-        ttk.Checkbutton(frm_toggles, text="窗口置顶",
+        self.chk_topmost = ttk.Checkbutton(frm_toggles, text=i18n._("opt_topmost"),
                         variable=self.var_topmost,
-                        command=self._on_topmost).pack(side="left", padx=5)
+                        command=self._on_topmost)
+        self.chk_topmost.pack(side="left", padx=5)
 
         self.var_show_debug = tk.BooleanVar(value=config.SHOW_DEBUG)
-        ttk.Checkbutton(frm_toggles, text="Debug窗口",
+        self.chk_show_debug = ttk.Checkbutton(frm_toggles, text=i18n._("opt_debug_window"),
                         variable=self.var_show_debug,
-                        command=self._on_debug_toggle).pack(side="left", padx=5)
+                        command=self._on_debug_toggle)
+        self.chk_show_debug.pack(side="left", padx=5)
 
         self.var_force_reset = tk.BooleanVar(value=config.ENABLE_FORCE_RESET)
-        ttk.Checkbutton(frm_toggles, text="强制重置",
+        self.chk_force_reset = ttk.Checkbutton(frm_toggles, text=i18n._("opt_force_reset"),
                         variable=self.var_force_reset,
-                        command=self._on_force_reset_toggle).pack(side="left", padx=5)
+                        command=self._on_force_reset_toggle)
+        self.chk_force_reset.pack(side="left", padx=5)
 
         # ── YOLO 控制区 ──
-        frm_yolo = ttk.LabelFrame(self.root, text=" YOLO 目标检测 ")
-        frm_yolo.pack(fill="x", **pad)
+        self.frm_yolo = ttk.LabelFrame(self.root, text=i18n._("yolo_group"))
+        self.frm_yolo.pack(fill="x", **pad)
 
         config.USE_YOLO = True
-        ttk.Label(frm_yolo, text="YOLO 已启用").pack(side="left", padx=5)
+        self.lbl_yolo_enabled = ttk.Label(self.frm_yolo, text=i18n._("yolo_enabled"))
+        self.lbl_yolo_enabled.pack(side="left", padx=5)
 
         self.var_yolo_collect = tk.BooleanVar(value=config.YOLO_COLLECT)
-        ttk.Checkbutton(frm_yolo, text="采集数据",
+        self.chk_yolo_collect = ttk.Checkbutton(self.frm_yolo, text=i18n._("opt_collect_data"),
                         variable=self.var_yolo_collect,
-                        command=self._on_yolo_collect_toggle).pack(
-                            side="left", padx=5)
+                        command=self._on_yolo_collect_toggle)
+        self.chk_yolo_collect.pack(side="left", padx=5)
 
         # 仅在失败时采集
         self.var_yolo_collect_on_fail = tk.BooleanVar(value=config.YOLO_COLLECT_ON_FAIL)
-        ttk.Checkbutton(frm_yolo, text="仅在失败采集",
+        self.chk_yolo_fail = ttk.Checkbutton(self.frm_yolo, text=i18n._("opt_collect_on_fail"),
                         variable=self.var_yolo_collect_on_fail,
-                        command=self._on_yolo_collect_on_fail_toggle).pack(
-                            side="left", padx=5)
+                        command=self._on_yolo_collect_on_fail_toggle)
+        self.chk_yolo_fail.pack(side="left", padx=5)
 
-        ttk.Label(frm_yolo, text="设备:").pack(side="left", padx=(10, 2))
+        self.lbl_yolo_device = ttk.Label(self.frm_yolo, text=i18n._("yolo_device"))
+        self.lbl_yolo_device.pack(side="left", padx=(10, 2))
         self.var_yolo_device = tk.StringVar(value=config.YOLO_DEVICE)
-        cmb_dev = ttk.Combobox(frm_yolo, textvariable=self.var_yolo_device,
+        cmb_dev = ttk.Combobox(self.frm_yolo, textvariable=self.var_yolo_device,
                                values=["auto", "cpu", "gpu"],
                                state="readonly", width=5)
         cmb_dev.pack(side="left", padx=2)
@@ -227,23 +227,24 @@ class FishingApp:
 
         self.var_yolo_status = tk.StringVar(value="")
         self._update_yolo_status()
-        ttk.Label(frm_yolo, textvariable=self.var_yolo_status,
+        ttk.Label(self.frm_yolo, textvariable=self.var_yolo_status,
                   foreground="gray").pack(side="left", padx=10)
 
         # ── 检测区域框选 ──
         frm_roi = ttk.Frame(self.root)
         frm_roi.pack(fill="x", **pad)
 
-        self.btn_roi = ttk.Button(frm_roi, text="📐 框选检测区域",
+        self.btn_roi = ttk.Button(frm_roi, text=i18n._("btn_select_roi"),
                                   command=self._on_select_roi, width=15)
         self.btn_roi.pack(side="left", padx=5)
 
-        self.btn_clear_roi = ttk.Button(frm_roi, text="✕ 清除区域",
+        self.btn_clear_roi = ttk.Button(frm_roi, text=i18n._("btn_clear_roi"),
                                         command=self._on_clear_roi, width=12)
         self.btn_clear_roi.pack(side="left", padx=5)
 
-        self.var_roi = tk.StringVar(value="未设置 (全屏搜索)")
-        ttk.Label(frm_roi, text="检测区域:").pack(side="left", padx=(10, 2))
+        self.lbl_roi_title = ttk.Label(frm_roi, text=i18n._("detect_region"))
+        self.lbl_roi_title.pack(side="left", padx=(10, 2))
+        self.var_roi = tk.StringVar(value=i18n._("roi_not_set"))
         self.lbl_roi = ttk.Label(frm_roi, textvariable=self.var_roi,
                                  foreground="gray")
         self.lbl_roi.pack(side="left")
@@ -254,11 +255,11 @@ class FishingApp:
         self._build_params_panel(pad)
 
         # ── 底部：日志 ──
-        frm_log = ttk.LabelFrame(self.root, text=" 日志 ")
-        frm_log.pack(fill="both", expand=True, **pad)
+        self.frm_log = ttk.LabelFrame(self.root, text=i18n._("log_group"))
+        self.frm_log.pack(fill="both", expand=True, **pad)
 
         self.txt_log = scrolledtext.ScrolledText(
-            frm_log, height=14, state="disabled",
+            self.frm_log, height=14, state="disabled",
             font=("Consolas", 9), wrap="word",
             bg="#1e1e1e", fg="#d4d4d4",
             insertbackground="#d4d4d4",
@@ -266,19 +267,135 @@ class FishingApp:
         self.txt_log.pack(fill="both", expand=True, padx=5, pady=5)
 
     # ══════════════════════════════════════════════════════
-    #  参数调节面板
+    #  语言切换
     # ══════════════════════════════════════════════════════
 
-    def _build_params_panel(self, pad):
-        """构建小游戏参数实时调节面板"""
-        frm = ttk.LabelFrame(self.root, text=" 小游戏参数 (实时生效) ")
-        frm.pack(fill="x", **pad)
+    def _on_language_change(self, _event=None):
+        """切换界面语言"""
+        lang = self.var_language.get()
+        if lang == self._current_lang:
+            return
+        
+        self._current_lang = lang
+        i18n.set_language(lang)
+        config.LANGUAGE = lang
+        
+        # 先应用当前参数值到config（保存用户输入）
+        self._apply_params(save_only=True)
+        
+        # 更新所有界面文本
+        self._update_ui_text()
+        
+        # 重建参数面板以更新标签语言
+        self._rebuild_params_panel()
+        
+        # 保存设置
+        self._save_settings()
+        
+        self._log_msg(f"[Language] Switched to {lang}")
 
+    def _update_ui_text(self):
+        """更新所有UI文本"""
+        # 窗口标题
+        self.root.title(i18n._("app_title"))
+        
+        # 状态面板
+        self.frm_status.config(text=i18n._("status_group"))
+        self.lbl_status_title.config(text=i18n._("running_status"))
+        self.lbl_window_title.config(text=i18n._("window_status"))
+        self.lbl_count_title.config(text=i18n._("fish_count"))
+        self.lbl_success_title.config(text=i18n._("success_rate"))
+        self.lbl_reset_title.config(text=i18n._("force_reset"))
+        self.lbl_debug_title.config(text=i18n._("debug_mode"))
+        self.btn_view_log.config(text=i18n._("btn_view_log"))
+        
+        # 更新状态变量（根据当前状态重新设置）
+        if self.bot.running:
+            self.var_state.set(i18n._("running"))
+        else:
+            # 根据bot.state判断是就绪还是已停止
+            if self.bot.state in ["就绪", "Ready", "準備完了"]:
+                self.var_state.set(i18n._("ready"))
+            elif self.bot.state in ["已停止", "Stopped", "停止"]:
+                self.var_state.set(i18n._("stopped"))
+            else:
+                self.var_state.set(i18n._("ready"))
+        
+        # 更新调试模式状态
+        if self.bot.debug_mode:
+            self.var_debug.set(i18n._("debug_on"))
+        else:
+            self.var_debug.set(i18n._("debug_off"))
+        
+        # 更新窗口连接状态
+        current_window = self.var_window.get()
+        if "HWND" in current_window or "(HWND=" in current_window:
+            # 保持原有HWND信息，只更新前缀
+            hwnd_start = current_window.find("(HWND=")
+            if hwnd_start == -1:
+                hwnd_start = current_window.find(" ")
+            if hwnd_start > 0:
+                hwnd_part = current_window[hwnd_start:]
+                self.var_window.set(f"{i18n._('connected')} {hwnd_part}")
+            else:
+                self.var_window.set(i18n._("connected"))
+        else:
+            self.var_window.set(i18n._("not_connected"))
+        
+        # 按钮
+        self.btn_start.config(text=i18n._("btn_start"))
+        self.btn_stop.config(text=i18n._("btn_stop"))
+        self.btn_debug.config(text=i18n._("btn_debug"))
+        self.btn_connect.config(text=i18n._("btn_connect"))
+        self.btn_screenshot.config(text=i18n._("btn_screenshot"))
+        self.btn_clearlog.config(text=i18n._("btn_clear_log"))
+        self.btn_whitelist.config(text=i18n._("btn_whitelist"))
+        
+        # 选项
+        self.chk_topmost.config(text=i18n._("opt_topmost"))
+        self.chk_show_debug.config(text=i18n._("opt_debug_window"))
+        self.chk_force_reset.config(text=i18n._("opt_force_reset"))
+        
+        # YOLO
+        self.frm_yolo.config(text=i18n._("yolo_group"))
+        self.lbl_yolo_enabled.config(text=i18n._("yolo_enabled"))
+        self.chk_yolo_collect.config(text=i18n._("opt_collect_data"))
+        self.chk_yolo_fail.config(text=i18n._("opt_collect_on_fail"))
+        self.lbl_yolo_device.config(text=i18n._("yolo_device"))
+        
+        # ROI
+        self.btn_roi.config(text=i18n._("btn_select_roi"))
+        self.btn_clear_roi.config(text=i18n._("btn_clear_roi"))
+        self.lbl_roi_title.config(text=i18n._("detect_region"))
+        if config.DETECT_ROI is None:
+            self.var_roi.set(i18n._("roi_not_set"))
+        
+        # 日志
+        self.frm_log.config(text=i18n._("log_group"))
+
+    def _rebuild_params_panel(self):
+        """重建参数面板以更新语言标签，保持原有位置"""
+        # 销毁旧的面板
+        self.frm_params.destroy()
+        
+        # 清空参数变量
+        self._param_vars.clear()
+        
+        # 重新构建（不调用pack）
+        pad = {"padx": 10, "pady": 5}
+        self.frm_params = ttk.LabelFrame(self.root, text=i18n._("params_group"))
+        
+        # 使用 before 参数确保参数面板在日志区域之前
+        self.frm_params.pack(fill="x", **pad, before=self.frm_log)
+        
         # 4列布局: [标签 输入框] [标签 输入框]
         cols_per_row = 2
         gpad = {"padx": 4, "pady": 2}
 
-        for i, (label, attr, vtype, tip) in enumerate(TUNABLE_PARAMS):
+        # 获取当前语言的参数列表
+        tunable_params = i18n.get_tunable_params(self._current_lang)
+
+        for i, (label, attr, vtype, tip) in enumerate(tunable_params):
             row = i // cols_per_row
             col_base = (i % cols_per_row) * 3   # 每组占3列: label, entry, unit
 
@@ -288,11 +405,11 @@ class FishingApp:
             self._param_vars[attr] = (var, vtype)
 
             # 标签
-            lbl = ttk.Label(frm, text=label, width=12, anchor="e")
+            lbl = ttk.Label(self.frm_params, text=label, width=12, anchor="e")
             lbl.grid(row=row, column=col_base, sticky="e", **gpad)
 
             # 输入框
-            entry = ttk.Entry(frm, textvariable=var, width=8,
+            entry = ttk.Entry(self.frm_params, textvariable=var, width=8,
                               justify="center")
             entry.grid(row=row, column=col_base + 1, sticky="w", **gpad)
 
@@ -305,15 +422,72 @@ class FishingApp:
                 self._create_tooltip(entry, tip)
 
         # 按钮行
-        total_rows = (len(TUNABLE_PARAMS) + cols_per_row - 1) // cols_per_row
-        btn_frame = ttk.Frame(frm)
+        total_rows = (len(tunable_params) + cols_per_row - 1) // cols_per_row
+        btn_frame = ttk.Frame(self.frm_params)
         btn_frame.grid(row=total_rows, column=0, columnspan=6,
                        pady=(5, 5), sticky="e", padx=10)
 
-        ttk.Button(btn_frame, text="应用参数",
-                   command=self._apply_params, width=10).pack(side="left", padx=3)
-        ttk.Button(btn_frame, text="恢复默认",
-                   command=self._reset_params, width=10).pack(side="left", padx=3)
+        self.btn_apply = ttk.Button(btn_frame, text=i18n._("btn_apply"),
+                   command=self._apply_params, width=10)
+        self.btn_apply.pack(side="left", padx=3)
+        self.btn_reset = ttk.Button(btn_frame, text=i18n._("btn_reset"),
+                   command=self._reset_params, width=10)
+        self.btn_reset.pack(side="left", padx=3)
+
+    # ══════════════════════════════════════════════════════
+    #  参数调节面板
+    # ══════════════════════════════════════════════════════
+
+    def _build_params_panel(self, pad):
+        """构建小游戏参数实时调节面板"""
+        self.frm_params = ttk.LabelFrame(self.root, text=i18n._("params_group"))
+        self.frm_params.pack(fill="x", **pad)
+
+        # 4列布局: [标签 输入框] [标签 输入框]
+        cols_per_row = 2
+        gpad = {"padx": 4, "pady": 2}
+
+        # 获取当前语言的参数列表
+        tunable_params = i18n.get_tunable_params(self._current_lang)
+
+        for i, (label, attr, vtype, tip) in enumerate(tunable_params):
+            row = i // cols_per_row
+            col_base = (i % cols_per_row) * 3   # 每组占3列: label, entry, unit
+
+            # 从 config 读取当前值并转换为显示值
+            display_val = self._config_to_display(attr, vtype)
+            var = tk.StringVar(value=display_val)
+            self._param_vars[attr] = (var, vtype)
+
+            # 标签
+            lbl = ttk.Label(self.frm_params, text=label, width=12, anchor="e")
+            lbl.grid(row=row, column=col_base, sticky="e", **gpad)
+
+            # 输入框
+            entry = ttk.Entry(self.frm_params, textvariable=var, width=8,
+                              justify="center")
+            entry.grid(row=row, column=col_base + 1, sticky="w", **gpad)
+
+            # 绑定回车和失焦自动应用
+            entry.bind("<Return>", lambda e: self._apply_params())
+            entry.bind("<FocusOut>", lambda e: self._apply_params())
+
+            # 提示 (鼠标悬停)
+            if tip:
+                self._create_tooltip(entry, tip)
+
+        # 按钮行
+        total_rows = (len(tunable_params) + cols_per_row - 1) // cols_per_row
+        btn_frame = ttk.Frame(self.frm_params)
+        btn_frame.grid(row=total_rows, column=0, columnspan=6,
+                       pady=(5, 5), sticky="e", padx=10)
+
+        self.btn_apply = ttk.Button(btn_frame, text=i18n._("btn_apply"),
+                   command=self._apply_params, width=10)
+        self.btn_apply.pack(side="left", padx=3)
+        self.btn_reset = ttk.Button(btn_frame, text=i18n._("btn_reset"),
+                   command=self._reset_params, width=10)
+        self.btn_reset.pack(side="left", padx=3)
 
     def _config_to_display(self, attr: str, vtype: str) -> str:
         """将 config 值转换为 GUI 显示值"""
@@ -356,8 +530,12 @@ class FishingApp:
             return None
         return None
 
-    def _apply_params(self):
-        """读取所有参数输入框，应用到 config 并保存到文件"""
+    def _apply_params(self, save_only=False):
+        """读取所有参数输入框，应用到 config 并保存到文件
+        
+        Args:
+            save_only: 如果为True，只保存到config但不写入文件和输出日志
+        """
         changed = []
         for attr, (var, vtype) in self._param_vars.items():
             new_val = self._display_to_config(var.get(), vtype)
@@ -376,7 +554,7 @@ class FishingApp:
                 setattr(config, attr, new_val)
                 changed.append(f"{attr}: {old_val} → {new_val}")
 
-        if changed:
+        if changed and not save_only:
             self._save_settings()
             self._log_msg(f"[参数] 已更新并保存: {', '.join(changed)}")
 
@@ -436,6 +614,7 @@ class FishingApp:
         data["SHOW_DEBUG"] = config.SHOW_DEBUG
         data["FISH_WHITELIST"] = config.FISH_WHITELIST
         data["ENABLE_FORCE_RESET"] = config.ENABLE_FORCE_RESET
+        data["LANGUAGE"] = getattr(config, 'LANGUAGE', 'zh')
         try:
             with open(config.SETTINGS_FILE, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
@@ -500,6 +679,14 @@ class FishingApp:
                     config.ENABLE_FORCE_RESET = bool(val)
                     if hasattr(self, 'var_force_reset'):
                         self.var_force_reset.set(config.ENABLE_FORCE_RESET)
+                    loaded.append(attr)
+                elif attr == "LANGUAGE":
+                    if val in ("zh", "en", "jp"):
+                        config.LANGUAGE = val
+                        self._current_lang = val
+                        i18n.set_language(val)
+                        if hasattr(self, 'var_language'):
+                            self.var_language.set(val)
                     loaded.append(attr)
                 elif attr in self._param_vars:
                     setattr(config, attr, val)
@@ -571,7 +758,7 @@ class FishingApp:
         self._apply_params()
 
         self.bot.running = True
-        self.bot.state = "运行中"
+        self.bot.state = i18n._("running")
 
         # 启动后台线程
         if self.bot_thread is None or not self.bot_thread.is_alive():
@@ -585,6 +772,7 @@ class FishingApp:
     def _on_stop(self):
         """停止钓鱼"""
         self.bot.running = False
+        self.bot.state = "stopped"  # 使用统一的状态键
         self.bot.input.safe_release()
         self.btn_start.config(state="normal")
         self.btn_stop.config(state="disabled")
@@ -594,7 +782,8 @@ class FishingApp:
     def _on_toggle_debug(self):
         """切换调试模式"""
         self.bot.debug_mode = not self.bot.debug_mode
-        tag = "开启" if self.bot.debug_mode else "关闭"
+        # 使用统一的开启/关闭翻译
+        tag = i18n._("debug_on") if self.bot.debug_mode else i18n._("debug_off")
         self.var_debug.set(tag)
         self._log_msg(f"[系统] 调试模式: {tag}")
         if self.bot.debug_mode:
@@ -610,7 +799,7 @@ class FishingApp:
             self.bot.screen.reset_capture_method()
             self._log_msg(f"[系统] 已连接: {self.bot.window.title}")
         else:
-            self.var_window.set("未找到")
+            self.var_window.set(i18n._("not_found"))
             self._log_msg("[错误] 未找到 VRChat 窗口")
 
     def _on_screenshot(self):
@@ -639,24 +828,24 @@ class FishingApp:
     def _on_whitelist(self):
         """弹窗: 勾选要钓的鱼种"""
         FISH_NAMES = [
-            ("fish_black",   "黑鱼"),
-            ("fish_white",   "白鱼"),
-            ("fish_copper",  "铜鱼"),
-            ("fish_green",   "绿鱼"),
-            ("fish_blue",    "蓝鱼"),
-            ("fish_purple",  "紫鱼"),
-            ("fish_pink",    "粉鱼"),
-            ("fish_red",     "红鱼"),
-            ("fish_rainbow", "彩鱼"),
+            ("fish_black",   i18n._("fish_black")),
+            ("fish_white",   i18n._("fish_white")),
+            ("fish_copper",  i18n._("fish_copper")),
+            ("fish_green",   i18n._("fish_green")),
+            ("fish_blue",    i18n._("fish_blue")),
+            ("fish_purple",  i18n._("fish_purple")),
+            ("fish_pink",    i18n._("fish_pink")),
+            ("fish_red",     i18n._("fish_red")),
+            ("fish_rainbow", i18n._("fish_rainbow")),
         ]
         win = tk.Toplevel(self.root)
-        win.title("钓鱼白名单")
+        win.title(i18n._("whitelist_title"))
         win.geometry("200x320")
         win.resizable(False, False)
         win.transient(self.root)
         win.grab_set()
 
-        ttk.Label(win, text="勾选要钓的鱼:").pack(pady=(10, 5))
+        ttk.Label(win, text=i18n._("whitelist_label")).pack(pady=(10, 5))
 
         wl = config.FISH_WHITELIST
         chk_vars = {}
@@ -674,7 +863,7 @@ class FishingApp:
             self._log_msg(f"[白名单] 已更新: {', '.join(enabled)}")
             win.destroy()
 
-        ttk.Button(win, text="确定", command=_apply).pack(pady=10)
+        ttk.Button(win, text=i18n._("btn_confirm"), command=_apply).pack(pady=10)
 
     def _on_topmost(self):
         """切换窗口置顶 (用 int 0/1 确保兼容性)"""
@@ -708,77 +897,78 @@ class FishingApp:
     def _on_view_reset_log(self):
         """查看强制重置日志弹窗"""
         log_window = tk.Toplevel(self.root)
-        log_window.title("强制重置日志")
-        log_window.geometry("400x500")
+        log_window.title(i18n._("reset_log_title"))
+        log_window.geometry("450x500")
         log_window.transient(self.root)  # 设置为父窗口的子窗口
         log_window.grab_set()  # 模态窗口
         
         # 标题
-        ttk.Label(log_window, text="强制重置记录", font=("", 12, "bold")).pack(pady=10)
-        
-        # 日志列表
-        frm_list = ttk.Frame(log_window)
-        frm_list.pack(fill="both", expand=True, padx=10, pady=5)
+        ttk.Label(log_window, text=i18n._("reset_log_record"), font=("", 12, "bold")).pack(pady=10)
         
         # 获取日志
         reset_log = self.bot.get_force_reset_log()
         
         if not reset_log:
-            ttk.Label(frm_list, text="暂无强制重置记录", foreground="gray").pack(pady=20)
+            ttk.Label(log_window, text=i18n._("reset_log_empty"), foreground="gray").pack(pady=20)
         else:
+            # 创建主框架
+            main_frame = ttk.Frame(log_window)
+            main_frame.pack(fill="both", expand=True, padx=10, pady=5)
+            
             # 表头
-            frm_header = ttk.Frame(frm_list)
+            frm_header = ttk.Frame(main_frame)
             frm_header.pack(fill="x", pady=(0, 5))
-            ttk.Label(frm_header, text="序号", width=8).pack(side="left")
-            ttk.Label(frm_header, text="重置时间", width=20).pack(side="left")
+            ttk.Label(frm_header, text=i18n._("reset_log_index"), width=10).pack(side="left")
+            ttk.Label(frm_header, text=i18n._("reset_log_time"), width=20).pack(side="left")
             
             # 分隔线
-            ttk.Separator(frm_list, orient="horizontal").pack(fill="x")
+            ttk.Separator(main_frame, orient="horizontal").pack(fill="x")
             
-            # 滚动区域
-            canvas = tk.Canvas(frm_list)
-            scrollbar = ttk.Scrollbar(frm_list, orient="vertical", command=canvas.yview)
-            scroll_frame = ttk.Frame(canvas)
+            # 创建滚动区域 - 使用ScrolledText简化实现
+            txt_frame = ttk.Frame(main_frame)
+            txt_frame.pack(fill="both", expand=True, pady=5)
             
-            scroll_frame.bind(
-                "<Configure>",
-                lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-            )
+            txt_records = tk.Text(txt_frame, height=15, width=40, 
+                                  font=("Consolas", 10),
+                                  bg="#f5f5f5", fg="#333333",
+                                  relief="flat", state="disabled")
+            scrollbar = ttk.Scrollbar(txt_frame, orient="vertical", command=txt_records.yview)
+            txt_records.configure(yscrollcommand=scrollbar.set)
             
-            canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
-            canvas.configure(yscrollcommand=scrollbar.set)
+            txt_records.pack(side="left", fill="both", expand=True)
+            scrollbar.pack(side="right", fill="y")
             
             # 填充数据（倒序显示，最新的在前）
+            txt_records.config(state="normal")
             for entry in reversed(reset_log):
-                row = ttk.Frame(scroll_frame)
-                row.pack(fill="x", pady=2)
-                ttk.Label(row, text=f"#{entry['count']}", width=8).pack(side="left")
-                ttk.Label(row, text=entry['timestamp'], width=20).pack(side="left")
-            
-            canvas.pack(side="left", fill="both", expand=True)
-            scrollbar.pack(side="right", fill="y")
+                line = f"#{entry['count']:<6} {entry['timestamp']}\n"
+                txt_records.insert("end", line)
+            txt_records.config(state="disabled")
         
         # 统计信息
         ttk.Separator(log_window, orient="horizontal").pack(fill="x", padx=10, pady=5)
         frm_stats = ttk.Frame(log_window)
         frm_stats.pack(fill="x", padx=10, pady=5)
-        ttk.Label(frm_stats, text=f"总计: {len(reset_log)} 次", font=("", 10, "bold")).pack(side="left")
+        ttk.Label(frm_stats, text=i18n._("reset_log_total", len(reset_log)), 
+                  font=("", 10, "bold")).pack(side="left")
         
         # 按钮区域
         frm_buttons = ttk.Frame(log_window)
         frm_buttons.pack(fill="x", padx=10, pady=10)
         
-        ttk.Button(frm_buttons, text="清空日志",
-                   command=lambda: self._on_clear_reset_log(log_window)).pack(side="left", padx=5)
-        ttk.Button(frm_buttons, text="关闭",
-                   command=log_window.destroy).pack(side="right", padx=5)
+        btn_clear = ttk.Button(frm_buttons, text=i18n._("btn_clear"),
+                   command=lambda: self._on_clear_reset_log(log_window))
+        btn_clear.pack(side="left", padx=5)
+        btn_close = ttk.Button(frm_buttons, text=i18n._("btn_close"),
+                   command=log_window.destroy)
+        btn_close.pack(side="right", padx=5)
 
     def _on_clear_reset_log(self, parent_window=None):
         """清空强制重置日志"""
         import tkinter.messagebox as msgbox
-        if msgbox.askyesno("确认", "确定要清空所有强制重置日志吗？"):
+        if msgbox.askyesno(i18n._("confirm_title"), i18n._("confirm_clear_log")):
             self.bot.clear_force_reset_log()
-            self.var_force_reset_count.set("0次")
+            self.var_force_reset_count.set("0")
             self._log_msg("[日志] 强制重置日志已清空")
             if parent_window:
                 parent_window.destroy()
@@ -845,11 +1035,11 @@ class FishingApp:
 
         parts = []
         if model_ok:
-            parts.append("模型 ✓")
+            parts.append(i18n._("yolo_model_ok"))
         else:
-            parts.append("模型 ✗")
-        parts.append(f"训练:{n_train}")
-        parts.append(f"未标:{n_unlabeled}")
+            parts.append(i18n._("yolo_model_fail"))
+        parts.append(f"train:{n_train}")
+        parts.append(f"unlabeled:{n_unlabeled}")
         self.var_yolo_status.set(" | ".join(parts))
 
     def _on_select_roi(self):
@@ -896,7 +1086,7 @@ class FishingApp:
         """清除框选区域"""
         config.DETECT_ROI = None
         self._save_settings()
-        self.var_roi.set("未设置 (全屏搜索)")
+        self.var_roi.set(i18n._("roi_not_set"))
         self.lbl_roi.config(foreground="gray")
         self._log_msg("[框选] 已清除检测区域, 将使用全屏搜索")
 
@@ -941,8 +1131,31 @@ class FishingApp:
         except queue.Empty:
             pass
 
-        # 更新状态
-        self.var_state.set(self.bot.state)
+        # 更新状态（使用当前语言翻译）
+        if self.bot.running:
+            self.var_state.set(i18n._("running"))
+        else:
+            # 将bot的内部状态映射到翻译键
+            state_map = {
+                # 就绪状态
+                "就绪": "ready",
+                "ready": "ready",
+                "Ready": "ready", 
+                "準備完了": "ready",
+                # 运行中状态
+                "运行中": "running",
+                "running": "running",
+                "Running": "running",
+                "実行中": "running",
+                # 已停止状态
+                "已停止": "stopped",
+                "stopped": "stopped",
+                "Stopped": "stopped",
+                "停止": "stopped",
+            }
+            # 获取状态对应的翻译键，如果没有则使用ready
+            state_key = state_map.get(self.bot.state, "ready")
+            self.var_state.set(i18n._(state_key))
         self.var_count.set(str(self.bot.fish_count))
 
         # 更新成功率显示
@@ -954,7 +1167,7 @@ class FishingApp:
             self.var_success_rate.set("0/0 (0%)")
 
         # 更新强制重置次数
-        self.var_force_reset_count.set(f"{self.bot._force_reset_count}次")
+        self.var_force_reset_count.set(str(self.bot._force_reset_count))
 
         # 状态颜色
         if self.bot.running:
@@ -1004,4 +1217,4 @@ class FishingApp:
         import os
         path = os.path.join(config.DEBUG_DIR, "last_run.log")
         log.save(path)
-        self._log_msg(f"[系统] 日志已保存 → {path}")
+        self._log_msg(i18n._("msg_log_saved", path))
