@@ -118,9 +118,19 @@ class YoloDetector:
                 img = screen[ry:ry+rh, rx:rx+rw].copy()
                 ox, oy = rx, ry
 
+        # 动态推理分辨率: ROI 较小时避免把小图放大到 640 浪费算力
+        # 安全阈值: max(h,w) >= 400px → 保持 640 (模型训练分辨率，精度最优)
+        #           max(h,w) <  400px → 向上取整到最近的 32 倍数，最低 320
+        _h, _w = img.shape[:2]
+        _max_dim = max(_h, _w)
+        if _max_dim < 400:
+            _infer_size = max(320, ((_max_dim + 31) // 32) * 32)
+        else:
+            _infer_size = 640
+
         results = self.model.predict(
             img, conf=self.conf, device=self._device,
-            verbose=False, imgsz=640,
+            verbose=False, imgsz=_infer_size,
         )
 
         detections = {

@@ -32,6 +32,7 @@ class InputController:
         self.mouse_is_down = False
         self._click_x = 400
         self._click_y = 400
+        self._osc = None   # OSC 客户端单例 (延迟初始化, 避免重复创建 UDP socket)
 
     # ────────────────── 内部工具 ──────────────────
 
@@ -92,6 +93,13 @@ class InputController:
 
     # ────────────────── 摇头 (OSC) ──────────────────
 
+    def _get_osc(self):
+        """获取 OSC 客户端单例，首次调用时创建，后续复用同一个 UDP socket。"""
+        if self._osc is None:
+            from pythonosc import udp_client
+            self._osc = udp_client.SimpleUDPClient("127.0.0.1", 9000)
+        return self._osc
+
     def shake_head(self):
         """抛竿前摇头: 右→左，对称两步，始终通过 OSC。"""
         import config as _cfg
@@ -99,8 +107,7 @@ class InputController:
         if t <= 0:
             return
         try:
-            from pythonosc import udp_client
-            osc = udp_client.SimpleUDPClient("127.0.0.1", 9000)
+            osc = self._get_osc()
         except Exception:
             return
         try:
@@ -114,7 +121,7 @@ class InputController:
             osc.send_message("/input/LookLeft", 0)
             time.sleep(0.05)
         except Exception:
-            pass
+            self._osc = None   # 发送失败时重置, 下次重新创建
 
     # ────────────────── 安全 ──────────────────
 
